@@ -1,0 +1,17 @@
+{
+  "name": "HargaKu Online — Catat Jual & Kematian",
+  "short_name": "HargaKu",
+  "description": "Aplikasi pencatat penjualan dan kematian ternak, tersinkron ke Google Sheet dengan role Bos dan Admin.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#0f766e",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
