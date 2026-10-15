@@ -251,11 +251,13 @@ function renderSetup() {
           Minta string konfigurasi ke Bos (bentuknya <b>URL|KUNCI</b>, biasanya dikirim lewat WhatsApp),
           lalu tempel di bawah ini.
         </p>
+        <form onsubmit="saveSetup();return false">
         <div class="field">
           <label>String konfigurasi</label>
           <input id="cfg-string" placeholder="https://script.google.com/.../exec|kunci-rahasia" autocomplete="off">
         </div>
-        <button class="btn" onclick="saveSetup()">Hubungkan</button>
+        <button class="btn" type="submit">Hubungkan</button>
+        </form>
       </div>
       <p class="muted" style="text-align:center;font-size:.75rem">
         Bos: panduan lengkap ada di README.md bagian "Panduan Setup Sekali Saja".
@@ -296,6 +298,7 @@ function renderLogin() {
         <p>Catat penjualan &amp; kematian ternak — data langsung tersinkron</p>
       </div>
       <div class="card">
+        <form onsubmit="doLogin();return false">
         <div class="field">
           <label>Nama</label>
           <input id="l-nama" placeholder="cth: Budi" autocomplete="username">
@@ -303,10 +306,10 @@ function renderLogin() {
         <div class="field">
           <label>PIN</label>
           <input id="l-pin" type="password" inputmode="numeric" maxlength="8"
-            placeholder="Masukkan PIN" autocomplete="current-password"
-            onkeydown="if(event.key==='Enter')doLogin()">
+            placeholder="Masukkan PIN" autocomplete="current-password">
         </div>
-        <button class="btn" onclick="doLogin()">Masuk</button>
+        <button class="btn" type="submit">Masuk</button>
+        </form>
       </div>
       <p class="muted" style="text-align:center;font-size:.75rem">
         Salah HP? <a href="#" onclick="setCfg(null);setSes(null);location.hash='#/setup';return false;">Ganti konfigurasi</a>
@@ -343,6 +346,7 @@ function renderJual(ses) {
     ${headerHTML("Input Penjualan", "Stok berkurang otomatis setelah tersimpan")}
     <div class="content">
       <div class="card">
+        <form onsubmit="submitJual();return false">
         <div class="field">
           <label>Pilih barang / unggas</label>
           <select id="s-product" onchange="sellProductId=this.value;renderJual(getSes())">
@@ -369,8 +373,9 @@ function renderJual(ses) {
               <b id="s-total" style="font-size:1.1rem">${rp(p.harga_jual)}</b>
             </div>
           </div>
-          <button class="btn" onclick="submitJual()">✅ Simpan Penjualan</button>
+          <button class="btn" type="submit">✅ Simpan Penjualan</button>
         ` : ""}
+        </form>
       </div>
       <button class="btn secondary" onclick="location.hash='#/mati'">🐔 Catat Kematian</button>
     </div>
@@ -420,6 +425,7 @@ function renderMati(ses) {
     ${headerHTML("Catat Kematian", "Unggas yang mati mengurangi stok")}
     <div class="content">
       <div class="card">
+        <form onsubmit="submitMati();return false">
         <div class="field">
           <label>Pilih barang / unggas</label>
           <select id="m-product" onchange="deathProductId=this.value;renderMati(getSes())">
@@ -433,8 +439,9 @@ function renderMati(ses) {
             <label>Jumlah mati (ekor)</label>
             <input id="m-qty" type="number" min="1" max="${p.stok}" inputmode="numeric" value="1">
           </div>
-          <button class="btn danger" onclick="submitMati()">💀 Simpan Catatan Kematian</button>
+          <button class="btn danger" type="submit">💀 Simpan Catatan Kematian</button>
         ` : ""}
+        </form>
       </div>
     </div>
     ${bottomNav(navFor(ses), "#/mati")}
@@ -520,11 +527,13 @@ function renderPengaturan(ses) {
     <div class="content">
       <div class="card">
         <h3>🔑 Ganti PIN saya</h3>
+        <form onsubmit="gantiPinSendiri();return false">
         <div class="field">
           <label>PIN baru (4–8 digit)</label>
           <input id="p-pin" type="password" inputmode="numeric" maxlength="8" placeholder="PIN baru">
         </div>
-        <button class="btn" onclick="gantiPinSendiri()">Simpan PIN Baru</button>
+        <button class="btn" type="submit">Simpan PIN Baru</button>
+        </form>
       </div>
       <div class="card">
         <h3>🔗 Konfigurasi koneksi</h3>
@@ -694,6 +703,7 @@ function bosBarangForm(ses, hash) {
     ${headerHTML(p ? "Edit Barang" : "Tambah Barang", "Lengkapi harga modal & harga jual")}
     <div class="content">
       <div class="card">
+        <form onsubmit="simpanBarang('${p ? p.id : ""}');return false">
         <div class="field">
           <label>Nama barang</label>
           <input id="f-nama" value="${esc(p ? p.nama : "")}" placeholder="cth: Ayam Broiler">
@@ -714,21 +724,22 @@ function bosBarangForm(ses, hash) {
             value="${p ? Number(p.stok) : ""}" placeholder="cth: 100">
         </div>
         <div class="btn-row">
-          <button class="btn secondary" onclick="history.back()">Batal</button>
-          <button class="btn" onclick="simpanBarang('${p ? p.id : ""}')">Simpan</button>
+          <button class="btn secondary" type="button" onclick="history.back()">Batal</button>
+          <button class="btn" type="submit">Simpan</button>
         </div>
+        </form>
       </div>
     </div>
   `);
 }
 async function simpanBarang(id) {
   const params = {
-    nama: document.getElementById("f-nama").value.trim(),
+    barang_nama: document.getElementById("f-nama").value.trim(),
     harga_belanja: Number(document.getElementById("f-belanja").value),
     harga_jual: Number(document.getElementById("f-jual").value),
     stok: Number(document.getElementById("f-stok").value),
   };
-  if (!params.nama) { toast("Nama barang wajib diisi.", true); return; }
+  if (!params.barang_nama) { toast("Nama barang wajib diisi.", true); return; }
   if (isNaN(params.harga_belanja) || isNaN(params.harga_jual) || isNaN(params.stok)) {
     toast("Harga & stok harus angka.", true); return;
   }
@@ -752,6 +763,7 @@ async function bosAdmin(ses) {
     <div class="content">
       <div class="card">
         <h3>＋ Tambah Admin</h3>
+        <form onsubmit="tambahAdmin();return false">
         <div class="field">
           <label>Nama admin</label>
           <input id="a-nama" placeholder="cth: Budi">
@@ -760,7 +772,8 @@ async function bosAdmin(ses) {
           <label>PIN (4–8 digit)</label>
           <input id="a-pin" type="password" inputmode="numeric" maxlength="8" placeholder="cth: 5678">
         </div>
-        <button class="btn" onclick="tambahAdmin()">Simpan Admin</button>
+        <button class="btn" type="submit">Simpan Admin</button>
+        </form>
       </div>
       <div class="card" id="admin-list-card">
         <h3>Daftar pengguna</h3>
@@ -783,6 +796,8 @@ async function bosAdmin(ses) {
           </div>
           <div class="right">
             <button class="btn small secondary" onclick="gantiPinUser('${esc(u.nama)}')">Ganti PIN</button>
+            ${u.peran !== "bos" ? `
+            <button class="btn small danger" style="margin-top:6px" onclick="hapusAdmin('${esc(u.nama)}')">Hapus</button>` : ""}
           </div>
         </div>`).join("")}
       </div>`;
@@ -798,8 +813,19 @@ async function tambahAdmin() {
   if (!/^\d{4,8}$/.test(pin)) { toast("PIN harus 4–8 digit angka.", true); return; }
   if (!navigator.onLine) { toast("Tambah admin butuh koneksi internet.", true); return; }
   try {
-    await api("admin_add", { nama, pin });
+    await api("admin_add", { admin_nama: nama, admin_pin: pin });
     toast("Admin " + nama + " ditambahkan.");
+    bosAdmin(getSes());
+  } catch (e) {
+    toast(isNetError(e) ? "Tidak ada koneksi internet." : e.message, true);
+  }
+}
+async function hapusAdmin(nama) {
+  if (!navigator.onLine) { toast("Hapus admin butuh koneksi internet.", true); return; }
+  if (!confirm("Hapus admin " + nama + "? Riwayat transaksinya tetap tersimpan.")) return;
+  try {
+    await api("admin_delete", { target_nama: nama });
+    toast("Admin " + nama + " dihapus.");
     bosAdmin(getSes());
   } catch (e) {
     toast(isNetError(e) ? "Tidak ada koneksi internet." : e.message, true);

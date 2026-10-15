@@ -1,6 +1,6 @@
 /* Service worker HargaKu Online — cache shell aplikasi saja.
    Panggilan API ke Google Apps Script TIDAK pernah di-cache. */
-const CACHE = "hargaku-online-v2";
+const CACHE = "hargaku-online-v3";
 const ASSETS = [
   "./",
   "./index.html",

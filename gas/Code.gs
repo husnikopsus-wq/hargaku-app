@@ -156,6 +156,7 @@ function handle(p) {
       case "barang_add":      return withLock(function () { return doBarangAdd(user, p); });
       case "barang_update":   return withLock(function () { return doBarangUpdate(user, p); });
       case "admin_add":       return withLock(function () { return doAdminAdd(user, p); });
+      case "admin_delete":    return withLock(function () { return doAdminDelete(user, p); });
       case "admin_list":      return out(doAdminList(user));
       case "user_pin_change": return withLock(function () { return doPinChange(user, p); });
       case "riwayat":         return out(doRiwayat(user));
@@ -209,7 +210,7 @@ function barangList(user) {
   return { ok: true, barang: list };
 }
 function validAngkaBarang(p) {
-  var nama = String(p.nama || "").trim();
+  var nama = String(p.barang_nama || "").trim();
   var belanja = Number(p.harga_belanja);
   var jual = Number(p.harga_jual);
   var stok = Math.floor(Number(p.stok));
@@ -265,12 +266,25 @@ function doMati(user, p) { return catatTransaksi(user, p, "mati"); }
 /* ---------------- Pengguna ---------------- */
 function doAdminAdd(user, p) {
   var deny = needBos(user); if (deny) return deny;
-  var nama = String(p.nama || "").trim();
-  var pin = String(p.pin || "").trim();
-  if (!nama) return { ok: false, error: "Nama admin wajib diisi." };
+  var nama = String(p.admin_nama || "").trim();
+  var pin = String(p.admin_pin || "").trim();
+  if (!nama || !pin) return { ok: false, error: "Nama dan PIN admin wajib diisi." };
   if (!/^\d{4,8}$/.test(pin)) return { ok: false, error: "PIN harus 4-8 digit angka." };
   if (findUser(nama)) return { ok: false, error: "Nama sudah dipakai pengguna lain." };
   sheet("Users").appendRow([nama, sha256(pin), "admin"]);
+  return { ok: true };
+}
+function doAdminDelete(user, p) {
+  var deny = needBos(user); if (deny) return deny;
+  var nama = String(p.target_nama || "").trim();
+  if (!nama) return { ok: false, error: "Nama admin yang dihapus wajib diisi." };
+  var t = findUser(nama);
+  if (!t) return { ok: false, error: "Pengguna tidak ditemukan." };
+  if (t.peran === "bos") return { ok: false, error: "Akun Bos tidak bisa dihapus." };
+  if (t.nama.toLowerCase() === String(user.nama).toLowerCase()) {
+    return { ok: false, error: "Anda tidak bisa menghapus akun sendiri." };
+  }
+  sheet("Users").deleteRow(t.row);
   return { ok: true };
 }
 function doAdminList(user) {
