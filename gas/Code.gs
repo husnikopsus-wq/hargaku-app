@@ -255,10 +255,23 @@ function catatTransaksi(user, p, jenis) {
   var stokBaru = b.stok - jumlah;
   sheet("Barang").getRange(b.row, 5).setValue(stokBaru);
   // harga_belanja & harga_jual disimpan sebagai snapshot saat transaksi
+  var id = Utilities.getUuid();
+  var waktu = new Date();
   sheet("Transaksi").appendRow([
-    Utilities.getUuid(), new Date(), jenis, b.id, b.nama, jumlah, hargaJual, b.harga_belanja, user.nama
+    id, waktu, jenis, b.id, b.nama, jumlah, hargaJual, b.harga_belanja, user.nama
   ]);
-  return { ok: true, stok: stokBaru };
+  var tx = {
+    id: id,
+    waktu: Utilities.formatDate(waktu, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm"),
+    jenis: jenis,
+    nama_barang: b.nama,
+    jumlah: jumlah,
+    harga_jual: hargaJual,
+    admin: user.nama
+  };
+  // PENTING: admin tidak pernah menerima harga_belanja
+  if (user.peran === "bos") tx.harga_belanja = b.harga_belanja;
+  return { ok: true, stok: stokBaru, transaksi: tx };
 }
 function doJual(user, p) { return catatTransaksi(user, p, "jual"); }
 function doMati(user, p) { return catatTransaksi(user, p, "mati"); }
