@@ -356,6 +356,11 @@ function renderJual(ses) {
             autocomplete="off" oninput="jualPembeli=this.value">
         </div>
         <div class="field">
+          <label>No. HP pelanggan (opsional)</label>
+          <input id="s-nohp" type="tel" inputmode="tel" value="${esc(jualNoHp)}" placeholder="cth: 081234567890"
+            autocomplete="off" oninput="jualNoHp=this.value">
+        </div>
+        <div class="field">
           <label>Pilih barang / ikan</label>
           <select id="s-product" onchange="sellProductId=this.value;renderJual(getSes())">
             <option value="">— pilih barang —</option>
@@ -404,6 +409,7 @@ function renderJual(ses) {
   `);
 }
 let jualPembeli = "";
+let jualNoHp = "";
 let cart = []; // {id, nama, jumlah, harga_jual}
 function tambahKeranjang() {
   const p = BARANG.find((x) => x.id === sellProductId);
@@ -429,6 +435,7 @@ async function simpanPenjualan() {
   if (!navigator.onLine) { toast("Simpan penjualan butuh koneksi internet.", true); return; }
   const params = {
     pembeli: jualPembeli.trim(),
+    no_hp: jualNoHp.trim(),
     items: cart.map((c) => ({ barang_id: c.id, jumlah: c.jumlah, harga_jual: c.harga_jual })),
   };
   try {
@@ -442,6 +449,8 @@ async function simpanPenjualan() {
     };
     cart = [];
     sellProductId = null;
+    jualPembeli = "";
+    jualNoHp = "";
     toast("Penjualan tersimpan!");
     lastRefresh = 0;
     await refreshBarang(true);
@@ -581,7 +590,8 @@ async function renderRiwayat(ses) {
             </div>
             <div class="meta">
               ${fmtDate(t.waktu)}
-              ${t.pembeli ? `<br>• Pembeli: ${esc(t.pembeli)}` : ""}
+              ${t.pembeli ? `<br>• Pembeli: ${esc(t.pembeli)}${t.no_hp ? " (" + esc(t.no_hp) + ")" : ""}`
+                : (t.no_hp ? `<br>• No. HP: ${esc(t.no_hp)}` : "")}
               ${isBos && t.admin ? `<br>🙋 ${esc(t.admin)}` : ""}
               ${isBos && t.jenis === "mati" ? `<br>Kerugian ${rp(t.jumlah * (t.harga_belanja || 0))}` : ""}
             </div>
@@ -591,6 +601,9 @@ async function renderRiwayat(ses) {
               ? `<div class="price">${rp(t.jumlah * t.harga_jual)}</div><div class="meta">${rp(t.harga_jual)}/unit</div>
                  <button class="btn small secondary" style="margin-top:6px" onclick="cetakNotaRiwayat('${t.id}')">🖨️</button>`
               : `<div class="meta">—</div>`}
+            ${isBos ? `
+            <button class="btn small secondary" style="margin-top:6px" onclick="editTransaksi('${t.id}')">✏️</button>
+            <button class="btn small danger" style="margin-top:6px" onclick="hapusTransaksi('${t.id}')">🗑️</button>` : ""}
           </div>
         </div>`).join("")}
       </div>
@@ -611,6 +624,50 @@ async function cetakNotaRiwayat(id) {
     toast("Nota dikirim ke printer.");
   } catch (e) {
     toast(e.message, true);
+  }
+}
+async function editTransaksi(id) {
+  const t = RIWAYAT_LAST.find((x) => x.id === id);
+  if (!t) return;
+  const jumlahStr = prompt("Jumlah baru (sekarang: " + num(t.jumlah) + "):");
+  const jumlahKosong = jumlahStr === null || jumlahStr.trim() === "";
+  let hargaStr = null, hargaKosong = true;
+  if (t.jenis === "jual") {
+    hargaStr = prompt("Harga jual baru (sekarang: " + rp(t.harga_jual) + "):");
+    hargaKosong = hargaStr === null || hargaStr.trim() === "";
+  }
+  if (jumlahKosong && hargaKosong) { toast("Tidak ada perubahan."); return; }
+  const params = { id };
+  if (!jumlahKosong) {
+    const n = Math.floor(Number(jumlahStr.trim()));
+    if (!n || n <= 0) { toast("Jumlah tidak valid.", true); return; }
+    params.jumlah = n;
+  }
+  if (!hargaKosong) {
+    const h = Number(hargaStr.trim());
+    if (isNaN(h) || h < 0) { toast("Harga tidak valid.", true); return; }
+    params.harga_jual = h;
+  }
+  try {
+    await api("transaksi_edit", params);
+    toast("Transaksi direvisi.");
+    lastRefresh = 0;
+    refreshBarang(true);
+    renderRiwayat(getSes());
+  } catch (e) {
+    toast(isNetError(e) ? "Butuh koneksi untuk revisi." : e.message, true);
+  }
+}
+async function hapusTransaksi(id) {
+  if (!confirm("Hapus transaksi ini? Stok akan dikembalikan.")) return;
+  try {
+    await api("transaksi_hapus", { id });
+    toast("Transaksi dihapus, stok dikembalikan.");
+    lastRefresh = 0;
+    refreshBarang(true);
+    renderRiwayat(getSes());
+  } catch (e) {
+    toast(isNetError(e) ? "Butuh koneksi untuk menghapus." : e.message, true);
   }
 }
 
@@ -719,6 +776,7 @@ function renderBos(hash, ses) {
   if (hash === "#/mati") return renderMati(ses);
   if (hash === "#/bos/admin") return bosAdmin(ses);
   if (hash === "#/bos/laporan") return bosLaporan(ses);
+  if (hash === "#/bos/pelanggan") return bosPelanggan(ses);
   if (hash === "#/riwayat") return renderRiwayat(ses);
   if (hash === "#/pengaturan") return renderPengaturan(ses);
   location.hash = "#/bos";
@@ -976,7 +1034,10 @@ async function gantiPinUser(nama) {
 async function bosLaporan(ses) {
   setHTML(`
     ${headerHTML("Laporan", "Omset, kematian, kerugian, dan untung per produk")}
-    <div class="content"><div class="empty-state"><div class="big">⏳</div>Memuat laporan...</div></div>
+    <div class="content">
+      <button class="btn secondary" onclick="location.hash='#/bos/pelanggan'">👥 Database Pelanggan</button>
+      <div class="empty-state"><div class="big">⏳</div>Memuat laporan...</div>
+    </div>
     ${bottomNav(BOS_NAV, "#/bos/laporan")}
   `);
   let j;
@@ -995,6 +1056,7 @@ async function bosLaporan(ses) {
   const totalOmset = items.reduce((a, x) => a + x.omset, 0);
   const totalKerugian = items.reduce((a, x) => a + x.kerugian, 0);
   screen().querySelector(".content").innerHTML = `
+    <button class="btn secondary" onclick="location.hash='#/bos/pelanggan'">👥 Database Pelanggan</button>
     <div class="stats">
       <div class="stat"><div class="label">Omset</div><div class="value teal">${rp(totalOmset)}</div></div>
       <div class="stat"><div class="label">Kerugian</div><div class="value amber">${rp(totalKerugian)}</div></div>
@@ -1030,6 +1092,56 @@ async function bosLaporan(ses) {
       <div class="hint" style="margin-top:8px">Profit = Omset − modal barang terjual − kerugian kematian. Sisa stok bukan kerugian.</div>
     </div>
   `;
+}
+
+/* ---------- Database Pelanggan (Bos) ---------- */
+let pelangganSearch = "";
+let pelangganShowAll = false;
+let PELANGGAN = [];
+async function bosPelanggan(ses) {
+  setHTML(`
+    ${headerHTML("Database Pelanggan", "Terbentuk otomatis dari nota penjualan")}
+    <div class="content">
+      <input class="search-input" placeholder="🔍 Cari nama / no. HP..." value="${esc(pelangganSearch)}"
+        oninput="pelangganSearch=this.value;pelangganShowAll=false;refreshPelangganList()">
+      <div id="pelanggan-list"><div class="empty-state"><div class="big">⏳</div>Memuat pelanggan...</div></div>
+      <button class="btn secondary" onclick="location.hash='#/bos/laporan'">← Kembali ke Laporan</button>
+    </div>
+    ${bottomNav(BOS_NAV, "#/bos/laporan")}
+  `);
+  try {
+    const j = await api("pelanggan_list");
+    PELANGGAN = j.pelanggan || [];
+    refreshPelangganList();
+  } catch (e) {
+    const el = document.getElementById("pelanggan-list");
+    if (el) el.innerHTML = emptyState("📡", isNetError(e) ? "Butuh koneksi untuk memuat." : e.message);
+  }
+}
+function refreshPelangganList() {
+  const el = document.getElementById("pelanggan-list");
+  if (el) el.innerHTML = pelangganListHTML();
+}
+function pelangganListHTML() {
+  const q = pelangganSearch.toLowerCase();
+  const list = PELANGGAN.filter((c) => (c.nama + " " + c.no_hp).toLowerCase().includes(q));
+  if (list.length === 0) return emptyState("👥", "Belum ada pelanggan tercatat.");
+  const shown = pelangganShowAll ? list : list.slice(0, 50);
+  return `<div class="list">${shown.map((c) => `
+    <div class="item">
+      <div class="info">
+        <div class="name">${esc(c.nama || c.no_hp || "-")}</div>
+        <div class="meta">
+          ${c.no_hp ? "📞 " + esc(c.no_hp) + "<br>" : ""}
+          ${num(c.jumlah_transaksi)}× transaksi • Terakhir ${esc(c.terakhir_beli || "-")}
+        </div>
+      </div>
+      <div class="right"><div class="price">${rp(c.total_belanja)}</div></div>
+    </div>`).join("")}
+  </div>
+  ${!pelangganShowAll && list.length > 50
+    ? `<button class="btn secondary" onclick="pelangganShowAll=true;refreshPelangganList()">Tampilkan semua (${num(list.length)})</button>`
+    : ""}`;
 }
 
 /* =========================================================

@@ -32,7 +32,8 @@ var HEADERS = {
   Config:    ["key", "value"],
   Users:     ["nama", "pin_hash", "peran"],
   Barang:    ["id", "nama", "harga_belanja", "harga_jual", "stok"],
-  Transaksi: ["id", "waktu", "jenis", "barang_id", "nama_barang", "jumlah", "harga_jual", "harga_belanja", "admin", "pembeli"]
+  Transaksi: ["id", "waktu", "jenis", "barang_id", "nama_barang", "jumlah", "harga_jual", "harga_belanja", "admin", "pembeli", "no_hp"],
+  Pelanggan: ["nama", "no_hp", "jumlah_transaksi", "total_belanja", "terakhir_beli"]
 };
 
 /* ---------------- Util sheet ---------------- */
@@ -47,10 +48,11 @@ function rows(name) {
   var v = sheet(name).getDataRange().getValues();
   return v.slice(1);
 }
-// Migrasi ringan: sheet Transaksi lama hanya punya 9 kolom — tambahkan header "pembeli".
+// Migrasi ringan: sheet Transaksi lama mungkin belum punya kolom "pembeli"/"no_hp".
 function migrasiTransaksi() {
   var s = sheet("Transaksi");
   if (String(s.getRange(1, 10).getValue() || "") === "") s.getRange(1, 10).setValue("pembeli");
+  if (String(s.getRange(1, 11).getValue() || "") === "") s.getRange(1, 11).setValue("no_hp");
 }
 function sha256(text) {
   var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(text), Utilities.Charset.UTF_8);
@@ -77,7 +79,7 @@ function setConfig(key, value) {
 
 /* ---------------- Setup awal (jalankan sekali) ---------------- */
 function setup() {
-  var names = ["Config", "Users", "Barang", "Transaksi"];
+  var names = ["Config", "Users", "Barang", "Transaksi", "Pelanggan"];
   for (var i = 0; i < names.length; i++) sheet(names[i]);
 
   var key = getConfig("APP_KEY");
@@ -167,6 +169,9 @@ function handle(p) {
       case "user_pin_change": return withLock(function () { return doPinChange(user, p); });
       case "riwayat":         return out(doRiwayat(user));
       case "laporan":         return out(doLaporan(user));
+      case "pelanggan_list":  return out(doPelangganList(user));
+      case "transaksi_edit":  return withLock(function () { return doTransaksiEdit(user, p); });
+      case "transaksi_hapus": return withLock(function () { return doTransaksiHapus(user, p); });
       default:                return out({ ok: false, error: "Aksi tidak dikenal: " + action });
     }
   } catch (err) {
@@ -250,6 +255,40 @@ function doBarangUpdate(user, p) {
 }
 
 /* ---------------- Transaksi (jual / mati) ---------------- */
+// Nomor HP opsional: hanya angka 9-15 digit (spasi/strip/plus diabaikan).
+function validNoHp(raw) {
+  var hp = String(raw || "").replace(/[\s\-+]/g, "");
+  if (!hp) return { hp: "" };
+  if (!/^\d{9,15}$/.test(hp)) return { error: "Nomor HP tidak valid." };
+  return { hp: hp };
+}
+// Upsert database pelanggan — cocokkan no_hp (jika diisi), kalau tidak ada cocokkan nama.
+function catatPelanggan(nama, noHp, totalBelanja, waktuStr) {
+  nama = String(nama || "").trim();
+  noHp = String(noHp || "").trim();
+  if (!nama && !noHp) return;
+  var s = sheet("Pelanggan");
+  var v = s.getDataRange().getValues();
+  var rowIdx = -1;
+  for (var i = 1; i < v.length; i++) {
+    if (noHp) {
+      if (String(v[i][1] || "").toLowerCase() === noHp.toLowerCase()) { rowIdx = i + 1; break; }
+    } else if (String(v[i][0] || "").toLowerCase() === nama.toLowerCase()) { rowIdx = i + 1; break; }
+  }
+  if (rowIdx > 0) {
+    var cur = v[rowIdx - 1];
+    // Isi nama/no_hp yang dulu kosong bila sekarang diberikan
+    s.getRange(rowIdx, 1, 1, 5).setValues([[
+      String(cur[0] || "") || nama,
+      String(cur[1] || "") || noHp,
+      (Number(cur[2]) || 0) + 1,
+      (Number(cur[3]) || 0) + totalBelanja,
+      waktuStr
+    ]]);
+  } else {
+    s.appendRow([nama, noHp, 1, totalBelanja, waktuStr]);
+  }
+}
 function catatTransaksi(user, p, jenis) {
   var b = findBarang(p.barang_id);
   if (!b) return { ok: false, error: "Barang tidak ditemukan." };
@@ -263,6 +302,8 @@ function catatTransaksi(user, p, jenis) {
       ? Number(p.harga_jual) : b.harga_jual;
     if (isNaN(hargaJual) || hargaJual < 0) return { ok: false, error: "Harga jual tidak valid." };
   }
+  var hv = validNoHp(p.no_hp);
+  if (hv.error) return { ok: false, error: hv.error };
 
   var stokBaru = b.stok - jumlah;
   sheet("Barang").getRange(b.row, 5).setValue(stokBaru);
@@ -271,12 +312,14 @@ function catatTransaksi(user, p, jenis) {
   var pembeli = String(p.pembeli || "").trim();
   var id = Utilities.getUuid();
   var waktu = new Date();
+  var waktuStr = Utilities.formatDate(waktu, "Asia/Jakarta", "dd/MM/yyyy HH:mm");
   sheet("Transaksi").appendRow([
-    id, waktu, jenis, b.id, b.nama, jumlah, hargaJual, b.harga_belanja, user.nama, pembeli
+    id, waktu, jenis, b.id, b.nama, jumlah, hargaJual, b.harga_belanja, user.nama, pembeli, hv.hp
   ]);
+  if (jenis === "jual") catatPelanggan(pembeli, hv.hp, jumlah * hargaJual, waktuStr);
   var tx = {
     id: id,
-    waktu: Utilities.formatDate(waktu, "Asia/Jakarta", "dd/MM/yyyy HH:mm"),
+    waktu: waktuStr,
     jenis: jenis,
     nama_barang: b.nama,
     jumlah: jumlah,
@@ -299,6 +342,8 @@ function doJualMulti(user, p) {
     return { ok: false, error: "Keranjang kosong — tambahkan barang dulu." };
   }
   var pembeli = String(p.pembeli || "").trim();
+  var hv = validNoHp(p.no_hp);
+  if (hv.error) return { ok: false, error: hv.error };
   // Validasi per item + gabungkan barang_id yang sama
   var agg = {};
   var order = [];
@@ -337,10 +382,12 @@ function doJualMulti(user, p) {
       var subtotal = e.jumlah * e.harga;
       total += subtotal;
       // harga_belanja disimpan sebagai snapshot — tidak pernah masuk nota
-      ts.appendRow([Utilities.getUuid(), waktu, "jual", g2.b.id, g2.b.nama, e.jumlah, e.harga, g2.b.harga_belanja, user.nama, pembeli]);
+      ts.appendRow([Utilities.getUuid(), waktu, "jual", g2.b.id, g2.b.nama, e.jumlah, e.harga, g2.b.harga_belanja, user.nama, pembeli, hv.hp]);
       notaItems.push({ nama_barang: g2.b.nama, jumlah: e.jumlah, harga_jual: e.harga, subtotal: subtotal });
     }
   }
+  catatPelanggan(pembeli, hv.hp, total, waktuStr);
+  // no_hp sengaja TIDAK masuk nota — nota dicetak untuk pelanggan
   return { ok: true, nota: { pembeli: pembeli, waktu: waktuStr, admin: user.nama, items: notaItems, total: total } };
 }
 
@@ -407,7 +454,8 @@ function doRiwayat(user) {
       nama_barang: String(r[i][4]),
       jumlah: Number(r[i][5]) || 0,
       harga_jual: Number(r[i][6]) || 0,
-      pembeli: String(r[i][9] || "")
+      pembeli: String(r[i][9] || ""),
+      no_hp: String(r[i][10] || "")
     };
     // PENTING: admin tidak pernah menerima harga_belanja
     if (user.peran === "bos") {
@@ -419,6 +467,82 @@ function doRiwayat(user) {
   list.reverse(); // terbaru di atas
   if (list.length > 200) list = list.slice(0, 200); // batasi 200 transaksi terakhir
   return { ok: true, riwayat: list };
+}
+
+/* ---------------- Revisi transaksi (khusus Bos) ---------------- */
+function findTransaksi(id) {
+  var v = sheet("Transaksi").getDataRange().getValues();
+  for (var i = 1; i < v.length; i++) {
+    if (String(v[i][0]) === String(id || "")) {
+      return {
+        row: i + 1,
+        id: String(v[i][0]),
+        jenis: String(v[i][2]),
+        barang_id: String(v[i][3]),
+        jumlah: Number(v[i][5]) || 0,
+        harga_jual: Number(v[i][6]) || 0
+      };
+    }
+  }
+  return null;
+}
+function doTransaksiEdit(user, p) {
+  var deny = needBos(user); if (deny) return deny;
+  var t = findTransaksi(p.id);
+  if (!t) return { ok: false, error: "Transaksi tidak ditemukan." };
+  var adaJumlah = p.jumlah !== undefined && p.jumlah !== null && String(p.jumlah) !== "";
+  var adaHarga = p.harga_jual !== undefined && p.harga_jual !== null && String(p.harga_jual) !== "";
+  if (!adaJumlah && !adaHarga) return { ok: false, error: "Tidak ada perubahan." };
+  var s = sheet("Transaksi");
+  if (adaJumlah) {
+    var jumlahBaru = Math.floor(Number(p.jumlah));
+    if (!jumlahBaru || jumlahBaru <= 0) return { ok: false, error: "Jumlah harus angka lebih dari nol." };
+    if (jumlahBaru !== t.jumlah) {
+      var b = findBarang(t.barang_id);
+      if (!b) return { ok: false, error: "Barang sudah tidak ada, hanya harga yang bisa diubah." };
+      var delta = t.jumlah - jumlahBaru; // positif = stok kembali, negatif = stok berkurang lagi
+      if (delta < 0 && b.stok < -delta) {
+        return { ok: false, error: "Stok tidak cukup untuk revisi ini." };
+      }
+      sheet("Barang").getRange(b.row, 5).setValue(b.stok + delta);
+      s.getRange(t.row, 6).setValue(jumlahBaru);
+    }
+  }
+  if (adaHarga && t.jenis === "jual") {
+    var hargaBaru = Number(p.harga_jual);
+    if (isNaN(hargaBaru) || hargaBaru < 0) return { ok: false, error: "Harga jual tidak valid." };
+    s.getRange(t.row, 7).setValue(hargaBaru);
+  }
+  return { ok: true };
+}
+function doTransaksiHapus(user, p) {
+  var deny = needBos(user); if (deny) return deny;
+  var t = findTransaksi(p.id);
+  if (!t) return { ok: false, error: "Transaksi tidak ditemukan." };
+  // Kembalikan stok (jual & mati sama-sama mengurangi stok saat dicatat)
+  var b = findBarang(t.barang_id);
+  if (b) sheet("Barang").getRange(b.row, 5).setValue(b.stok + t.jumlah);
+  sheet("Transaksi").deleteRow(t.row);
+  return { ok: true };
+}
+
+/* ---------------- Pelanggan (khusus Bos) ---------------- */
+function doPelangganList(user) {
+  var deny = needBos(user); if (deny) return deny;
+  var r = rows("Pelanggan");
+  var list = [];
+  for (var i = 0; i < r.length; i++) {
+    if (!r[i][0] && !r[i][1]) continue;
+    list.push({
+      nama: String(r[i][0] || ""),
+      no_hp: String(r[i][1] || ""),
+      jumlah_transaksi: Number(r[i][2]) || 0,
+      total_belanja: Number(r[i][3]) || 0,
+      terakhir_beli: String(r[i][4] || "")
+    });
+  }
+  list.sort(function (a, b) { return b.total_belanja - a.total_belanja; });
+  return { ok: true, pelanggan: list };
 }
 
 /* ---------------- Laporan (khusus Bos) ---------------- */
