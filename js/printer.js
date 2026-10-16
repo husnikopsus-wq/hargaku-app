@@ -114,7 +114,7 @@ function notaBytes(tx) {
     new Uint8Array([ESC, 0x40]),                          // init
     new Uint8Array([ESC, 0x61, 0x01]),                    // rata tengah
     new Uint8Array([GS, 0x21, 0x11, ESC, 0x45, 0x01]),    // ukuran ganda + tebal
-    notaLine("HargaKu"),
+    notaLine("Teras Laut Cirebon"),
     new Uint8Array([GS, 0x21, 0x00, ESC, 0x45, 0x00]),    // ukuran normal
     notaLine("Nota Penjualan"),
     new Uint8Array([ESC, 0x61, 0x00]),                    // rata kiri
@@ -174,7 +174,7 @@ function printNotaFallback(tx) {
   .row { display: flex; justify-content: space-between; }
   hr { border: none; border-top: 1px dashed #000; }
 </style></head><body>
-  <div class="tengah toko">HargaKu</div>
+  <div class="tengah toko">Teras Laut Cirebon</div>
   <div class="tengah">Nota Penjualan</div>
   <hr>
   <div>${esc(tx.nama_barang || "-")}</div>

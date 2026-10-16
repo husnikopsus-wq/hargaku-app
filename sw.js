@@ -1,6 +1,6 @@
 /* Service worker HargaKu Online — cache shell aplikasi saja.
    Panggilan API ke Google Apps Script TIDAK pernah di-cache. */
-const CACHE = "hargaku-online-v4";
+const CACHE = "jualanku-v5";
 const ASSETS = [
   "./",
   "./index.html",
@@ -8,7 +8,9 @@ const ASSETS = [
   "./js/app.js",
   "./js/printer.js",
   "./manifest.json",
-  "./icon.svg",
+  "./img/logo-192.png",
+  "./img/logo-512.png",
+  "./img/logo-180.png",
 ];
 
 self.addEventListener("install", (e) => {

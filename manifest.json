@@ -1,17 +1,23 @@
 {
-  "name": "HargaKu Online — Catat Jual & Kematian",
-  "short_name": "HargaKu",
-  "description": "Aplikasi pencatat penjualan dan kematian ternak, tersinkron ke Google Sheet dengan role Bos dan Admin.",
+  "name": "JualanKu — Teras Laut Cirebon",
+  "short_name": "JualanKu",
+  "description": "Aplikasi kasir Teras Laut Cirebon: catat penjualan & kematian, tersinkron ke Google Sheet dengan peran Bos dan Admin.",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0b1220",
   "theme_color": "#0f766e",
   "icons": [
     {
-      "src": "icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "src": "img/logo-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "img/logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }

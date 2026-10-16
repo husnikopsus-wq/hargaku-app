@@ -205,3 +205,12 @@ hr.sep { border: none; border-top: 1px dashed var(--line); margin: 4px 0; }
 .report-table th:first-child, .report-table td:first-child { text-align: left; }
 .report-table thead th { color: var(--muted); font-size: .68rem; text-transform: uppercase; letter-spacing: .4px; }
 .report-table tfoot td { border-top: 2px solid var(--line); border-bottom: none; }
+
+.logo-img {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  display: block;
+  margin: 0 auto 12px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+}

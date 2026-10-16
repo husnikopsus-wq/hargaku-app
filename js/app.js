@@ -241,9 +241,9 @@ function renderSetup() {
   setHTML(`
     <div class="login-wrap">
       <div class="logo">
-        <div class="icon">🐔</div>
-        <h1>HargaKu Online</h1>
-        <p>Hubungkan aplikasi ini ke Google Sheet Bos Anda</p>
+        <img src="img/logo-192.png" alt="Logo Teras Laut Cirebon" class="logo-img">
+        <h1>JualanKu</h1>
+        <p><b>Teras Laut Cirebon</b> — hubungkan aplikasi ini ke Google Sheet Bos Anda</p>
       </div>
       <div class="card">
         <h3>Konfigurasi pertama kali</h3>
@@ -293,9 +293,9 @@ function renderLogin() {
   setHTML(`
     <div class="login-wrap">
       <div class="logo">
-        <div class="icon">🐔</div>
-        <h1>HargaKu Online</h1>
-        <p>Catat penjualan &amp; kematian ternak — data langsung tersinkron</p>
+        <img src="img/logo-192.png" alt="Logo Teras Laut Cirebon" class="logo-img">
+        <h1>JualanKu</h1>
+        <p><b>Teras Laut Cirebon</b> — catat penjualan &amp; kematian, data langsung tersinkron</p>
       </div>
       <div class="card">
         <form onsubmit="doLogin();return false">
