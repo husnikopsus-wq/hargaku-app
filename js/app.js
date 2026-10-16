@@ -741,12 +741,12 @@ function refreshBarangList() {
 }
 function barangListHTML() {
   const q = barangSearch.toLowerCase();
-  const list = BARANG.filter((p) => p.nama.toLowerCase().includes(q));
+  const list = BARANG.filter((p) => (p.nama + " " + p.id).toLowerCase().includes(q));
   if (list.length === 0) return emptyState("📦", "Belum ada barang. Tambahkan barang pertama Anda!");
   return `<div class="list">${list.map((p) => `
     <div class="item">
       <div class="info">
-        <div class="name">${esc(p.nama)}</div>
+        <div class="name">${esc(p.nama)} <span style="opacity:.55;font-size:12px">${esc(p.id)}</span></div>
         <div class="meta">
           Modal ${rp(p.harga_belanja)} • Jual ${rp(p.harga_jual)}<br>
           Untung/unit ${rp(p.harga_jual - p.harga_belanja)}
@@ -769,6 +769,10 @@ function bosBarangForm(ses, hash) {
     <div class="content">
       <div class="card">
         <form onsubmit="simpanBarang('${p ? p.id : ""}');return false">
+        <div class="field">
+          <label>ID barang (kode)${p ? "" : " — opsional, kosongkan untuk otomatis"}</label>
+          <input id="f-id" value="${esc(p ? p.id : "")}" placeholder="cth: AG-001" ${p ? "readonly" : ""}>
+        </div>
         <div class="field">
           <label>Nama barang</label>
           <input id="f-nama" value="${esc(p ? p.nama : "")}" placeholder="cth: Ayam Broiler">
@@ -804,6 +808,7 @@ async function simpanBarang(id) {
     harga_jual: Number(document.getElementById("f-jual").value),
     stok: Number(document.getElementById("f-stok").value),
   };
+  if (!id) params.barang_id = document.getElementById("f-id").value.trim();
   if (!params.barang_nama) { toast("Nama barang wajib diisi.", true); return; }
   if (isNaN(params.harga_belanja) || isNaN(params.harga_jual) || isNaN(params.stok)) {
     toast("Harga & stok harus angka.", true); return;
@@ -997,7 +1002,7 @@ function refreshStokList() {
 }
 function stokListHTML() {
   const q = stokSearch.toLowerCase();
-  const list = BARANG.filter((p) => p.nama.toLowerCase().includes(q));
+  const list = BARANG.filter((p) => (p.nama + " " + p.id).toLowerCase().includes(q));
   if (list.length === 0) return emptyState("📦", "Belum ada barang.");
   return `<div class="list">${list.map((p) => `
     <div class="item">

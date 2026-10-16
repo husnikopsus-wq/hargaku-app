@@ -224,8 +224,14 @@ function doBarangAdd(user, p) {
   var deny = needBos(user); if (deny) return deny;
   var v = validAngkaBarang(p);
   if (v.error) return { ok: false, error: v.error };
-  sheet("Barang").appendRow([Utilities.getUuid(), v.nama, v.belanja, v.jual, v.stok]);
-  return { ok: true };
+  var id = String(p.barang_id || "").trim();
+  if (id) {
+    if (findBarang(id)) return { ok: false, error: "ID barang sudah dipakai: " + id };
+  } else {
+    id = Utilities.getUuid();
+  }
+  sheet("Barang").appendRow([id, v.nama, v.belanja, v.jual, v.stok]);
+  return { ok: true, id: id };
 }
 function doBarangUpdate(user, p) {
   var deny = needBos(user); if (deny) return deny;
