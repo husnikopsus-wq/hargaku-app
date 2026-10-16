@@ -106,11 +106,35 @@ function notaWaktu(w) {
   return p2(d.getDate()) + "/" + p2(d.getMonth() + 1) + "/" + d.getFullYear() +
     " " + p2(d.getHours()) + ":" + p2(d.getMinutes());
 }
+// Terima dua bentuk: transaksi tunggal {nama_barang, jumlah, harga_jual, ...}
+// atau nota multi-item {pembeli, waktu, admin, items:[...], total}
+function notaNormal(tx) {
+  if (tx && Array.isArray(tx.items)) {
+    const items = tx.items.map((it) => ({
+      nama_barang: it.nama_barang,
+      jumlah: Number(it.jumlah) || 0,
+      harga_jual: Number(it.harga_jual) || 0,
+      subtotal: it.subtotal !== undefined ? Number(it.subtotal) : (Number(it.jumlah) || 0) * (Number(it.harga_jual) || 0),
+    }));
+    return {
+      items: items,
+      total: tx.total !== undefined ? Number(tx.total) : items.reduce((a, x) => a + x.subtotal, 0),
+      admin: tx.admin, waktu: tx.waktu, pembeli: tx.pembeli,
+    };
+  }
+  const jml = Number(tx.jumlah) || 0;
+  const hrg = Number(tx.harga_jual) || 0;
+  return {
+    items: [{ nama_barang: tx.nama_barang, jumlah: jml, harga_jual: hrg, subtotal: jml * hrg }],
+    total: jml * hrg,
+    admin: tx.admin, waktu: tx.waktu, pembeli: tx.pembeli,
+  };
+}
 function notaBytes(tx) {
   const ESC = 0x1b, GS = 0x1d;
-  const total = (Number(tx.jumlah) || 0) * (Number(tx.harga_jual) || 0);
+  const n = notaNormal(tx);
   const dash = "-".repeat(NOTA_WIDTH);
-  return notaGabung([
+  const parts = [
     new Uint8Array([ESC, 0x40]),                          // init
     new Uint8Array([ESC, 0x61, 0x01]),                    // rata tengah
     new Uint8Array([GS, 0x21, 0x11, ESC, 0x45, 0x01]),    // ukuran ganda + tebal
@@ -119,20 +143,27 @@ function notaBytes(tx) {
     notaLine("Nota Penjualan"),
     new Uint8Array([ESC, 0x61, 0x00]),                    // rata kiri
     notaLine(dash),
-    notaLine(String(tx.nama_barang || "-")),
-    notaLine(notaRow((Number(tx.jumlah) || 0) + " x " + rp(tx.harga_jual), rp(total))),
+    notaLine("Waktu : " + notaWaktu(n.waktu)),
+    notaLine("Kasir : " + (n.admin || "-")),
+  ];
+  if (n.pembeli) parts.push(notaLine("Pembeli: " + n.pembeli));
+  parts.push(notaLine(dash));
+  n.items.forEach((it) => {
+    parts.push(notaLine(String(it.nama_barang || "-")));
+    parts.push(notaLine(notaRow(it.jumlah + " x " + rp(it.harga_jual), rp(it.subtotal))));
+  });
+  parts.push(
     notaLine(dash),
     new Uint8Array([GS, 0x21, 0x10, ESC, 0x45, 0x01]),    // tinggi ganda + tebal
-    notaLine(notaRow("TOTAL", rp(total))),
+    notaLine(notaRow("TOTAL", rp(n.total))),
     new Uint8Array([GS, 0x21, 0x00, ESC, 0x45, 0x00]),
     notaLine(dash),
-    notaLine("Kasir : " + (tx.admin || "-")),
-    notaLine("Waktu : " + notaWaktu(tx.waktu)),
     new Uint8Array([ESC, 0x61, 0x01]),
     notaLine("Terima kasih!"),
     new Uint8Array([ESC, 0x64, 0x03]),                    // feed 3 baris
-    new Uint8Array([GS, 0x56, 0x01]),                     // potong sebagian
-  ]);
+    new Uint8Array([GS, 0x56, 0x01])                      // potong sebagian
+  );
+  return notaGabung(parts);
 }
 
 /* ---------------- Kirim ke printer ---------------- */
@@ -161,7 +192,7 @@ async function printNota(tx) {
 }
 // Cadangan: jendela cetak biasa — aplikasi pencetak OS (RawBT dsb.) bisa mengambil alih
 function printNotaFallback(tx) {
-  const total = (Number(tx.jumlah) || 0) * (Number(tx.harga_jual) || 0);
+  const n = notaNormal(tx);
   const w = window.open("", "_blank", "width=380,height=600");
   if (!w) throw new Error("Bluetooth tidak tersedia dan jendela cetak diblokir browser.");
   w.document.write(`<!DOCTYPE html>
@@ -177,13 +208,16 @@ function printNotaFallback(tx) {
   <div class="tengah toko">Teras Laut Cirebon</div>
   <div class="tengah">Nota Penjualan</div>
   <hr>
-  <div>${esc(tx.nama_barang || "-")}</div>
-  <div class="row"><span>${num(tx.jumlah)} x ${rp(tx.harga_jual)}</span><span>${rp(total)}</span></div>
+  <div>Waktu : ${esc(notaWaktu(n.waktu))}</div>
+  <div>Kasir : ${esc(n.admin || "-")}</div>
+  ${n.pembeli ? `<div>Pembeli: ${esc(n.pembeli)}</div>` : ""}
   <hr>
-  <div class="row total"><span>TOTAL</span><span>${rp(total)}</span></div>
+  ${n.items.map((it) => `
+  <div>${esc(it.nama_barang || "-")}</div>
+  <div class="row"><span>${num(it.jumlah)} x ${rp(it.harga_jual)}</span><span>${rp(it.subtotal)}</span></div>`).join("")}
   <hr>
-  <div>Kasir : ${esc(tx.admin || "-")}</div>
-  <div>Waktu : ${esc(notaWaktu(tx.waktu))}</div>
+  <div class="row total"><span>TOTAL</span><span>${rp(n.total)}</span></div>
+  <hr>
   <div class="tengah">Terima kasih!</div>
 </body></html>`);
   w.document.close();

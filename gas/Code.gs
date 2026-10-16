@@ -32,7 +32,7 @@ var HEADERS = {
   Config:    ["key", "value"],
   Users:     ["nama", "pin_hash", "peran"],
   Barang:    ["id", "nama", "harga_belanja", "harga_jual", "stok"],
-  Transaksi: ["id", "waktu", "jenis", "barang_id", "nama_barang", "jumlah", "harga_jual", "harga_belanja", "admin"]
+  Transaksi: ["id", "waktu", "jenis", "barang_id", "nama_barang", "jumlah", "harga_jual", "harga_belanja", "admin", "pembeli"]
 };
 
 /* ---------------- Util sheet ---------------- */
@@ -46,6 +46,11 @@ function sheet(name) {
 function rows(name) {
   var v = sheet(name).getDataRange().getValues();
   return v.slice(1);
+}
+// Migrasi ringan: sheet Transaksi lama hanya punya 9 kolom — tambahkan header "pembeli".
+function migrasiTransaksi() {
+  var s = sheet("Transaksi");
+  if (String(s.getRange(1, 10).getValue() || "") === "") s.getRange(1, 10).setValue("pembeli");
 }
 function sha256(text) {
   var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(text), Utilities.Charset.UTF_8);
@@ -152,6 +157,7 @@ function handle(p) {
       case "login":           return out({ ok: true, peran: user.peran });
       case "barang_list":     return out(barangList(user));
       case "jual":            return withLock(function () { return doJual(user, p); });
+      case "jual_multi":      return withLock(function () { return doJualMulti(user, p); });
       case "mati":            return withLock(function () { return doMati(user, p); });
       case "barang_add":      return withLock(function () { return doBarangAdd(user, p); });
       case "barang_update":   return withLock(function () { return doBarangUpdate(user, p); });
@@ -261,19 +267,22 @@ function catatTransaksi(user, p, jenis) {
   var stokBaru = b.stok - jumlah;
   sheet("Barang").getRange(b.row, 5).setValue(stokBaru);
   // harga_belanja & harga_jual disimpan sebagai snapshot saat transaksi
+  migrasiTransaksi();
+  var pembeli = String(p.pembeli || "").trim();
   var id = Utilities.getUuid();
   var waktu = new Date();
   sheet("Transaksi").appendRow([
-    id, waktu, jenis, b.id, b.nama, jumlah, hargaJual, b.harga_belanja, user.nama
+    id, waktu, jenis, b.id, b.nama, jumlah, hargaJual, b.harga_belanja, user.nama, pembeli
   ]);
   var tx = {
     id: id,
-    waktu: Utilities.formatDate(waktu, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm"),
+    waktu: Utilities.formatDate(waktu, "Asia/Jakarta", "dd/MM/yyyy HH:mm"),
     jenis: jenis,
     nama_barang: b.nama,
     jumlah: jumlah,
     harga_jual: hargaJual,
-    admin: user.nama
+    admin: user.nama,
+    pembeli: pembeli
   };
   // PENTING: admin tidak pernah menerima harga_belanja
   if (user.peran === "bos") tx.harga_belanja = b.harga_belanja;
@@ -281,6 +290,59 @@ function catatTransaksi(user, p, jenis) {
 }
 function doJual(user, p) { return catatTransaksi(user, p, "jual"); }
 function doMati(user, p) { return catatTransaksi(user, p, "mati"); }
+
+// Penjualan keranjang (multi item). Semua validasi & cek stok dilakukan
+// SEBELUM menulis apa pun — gagal satu, tidak ada yang tersimpan.
+function doJualMulti(user, p) {
+  var items = p.items;
+  if (!items || typeof items.length !== "number" || items.length === 0) {
+    return { ok: false, error: "Keranjang kosong — tambahkan barang dulu." };
+  }
+  var pembeli = String(p.pembeli || "").trim();
+  // Validasi per item + gabungkan barang_id yang sama
+  var agg = {};
+  var order = [];
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i] || {};
+    var b = findBarang(it.barang_id);
+    if (!b) return { ok: false, error: "Ada barang yang tidak ditemukan. Muat ulang daftar barang." };
+    var jumlah = Math.floor(Number(it.jumlah));
+    if (!jumlah || jumlah <= 0) return { ok: false, error: "Jumlah " + b.nama + " harus angka lebih dari nol." };
+    var harga = (it.harga_jual !== undefined && it.harga_jual !== null && String(it.harga_jual) !== "")
+      ? Number(it.harga_jual) : b.harga_jual;
+    if (isNaN(harga) || harga < 0) return { ok: false, error: "Harga jual " + b.nama + " tidak valid." };
+    if (!agg[b.id]) { agg[b.id] = { b: b, jumlah: 0, entries: [] }; order.push(b.id); }
+    agg[b.id].jumlah += jumlah;
+    agg[b.id].entries.push({ jumlah: jumlah, harga: harga });
+  }
+  // Cek stok untuk SEMUA barang dulu
+  for (var k = 0; k < order.length; k++) {
+    var g = agg[order[k]];
+    if (g.jumlah > g.b.stok) {
+      return { ok: false, error: "Stok " + g.b.nama + " tidak cukup (sisa " + g.b.stok + ")." };
+    }
+  }
+  migrasiTransaksi();
+  var waktu = new Date();
+  var waktuStr = Utilities.formatDate(waktu, "Asia/Jakarta", "dd/MM/yyyy HH:mm");
+  var notaItems = [];
+  var total = 0;
+  var ts = sheet("Transaksi");
+  var bs = sheet("Barang");
+  for (var m = 0; m < order.length; m++) {
+    var g2 = agg[order[m]];
+    bs.getRange(g2.b.row, 5).setValue(g2.b.stok - g2.jumlah);
+    for (var n = 0; n < g2.entries.length; n++) {
+      var e = g2.entries[n];
+      var subtotal = e.jumlah * e.harga;
+      total += subtotal;
+      // harga_belanja disimpan sebagai snapshot — tidak pernah masuk nota
+      ts.appendRow([Utilities.getUuid(), waktu, "jual", g2.b.id, g2.b.nama, e.jumlah, e.harga, g2.b.harga_belanja, user.nama, pembeli]);
+      notaItems.push({ nama_barang: g2.b.nama, jumlah: e.jumlah, harga_jual: e.harga, subtotal: subtotal });
+    }
+  }
+  return { ok: true, nota: { pembeli: pembeli, waktu: waktuStr, admin: user.nama, items: notaItems, total: total } };
+}
 
 /* ---------------- Pengguna ---------------- */
 function doAdminAdd(user, p) {
@@ -344,7 +406,8 @@ function doRiwayat(user) {
       barang_id: String(r[i][3]),
       nama_barang: String(r[i][4]),
       jumlah: Number(r[i][5]) || 0,
-      harga_jual: Number(r[i][6]) || 0
+      harga_jual: Number(r[i][6]) || 0,
+      pembeli: String(r[i][9] || "")
     };
     // PENTING: admin tidak pernah menerima harga_belanja
     if (user.peran === "bos") {
@@ -354,6 +417,7 @@ function doRiwayat(user) {
     list.push(row);
   }
   list.reverse(); // terbaru di atas
+  if (list.length > 200) list = list.slice(0, 200); // batasi 200 transaksi terakhir
   return { ok: true, riwayat: list };
 }
 

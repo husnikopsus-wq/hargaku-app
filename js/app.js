@@ -343,23 +343,20 @@ let lastNotaTx = null; // transaksi terakhir berhasil — untuk tombol Cetak Not
 function renderJual(ses) {
   const available = BARANG.filter((p) => Number(p.stok) > 0);
   const p = available.find((x) => x.id === sellProductId) || null;
+  const cartTotal = cart.reduce((a, c) => a + c.jumlah * c.harga_jual, 0);
   setHTML(`
     ${headerHTML("Input Penjualan", "Stok berkurang otomatis setelah tersimpan")}
     <div class="content">
-      ${lastNotaTx ? `
-      <div class="card" style="border:1px solid var(--accent)">
-        <div class="row-between">
-          <div>
-            <b>✅ Penjualan tersimpan</b><br>
-            <span class="muted">${esc(lastNotaTx.nama_barang)} × ${num(lastNotaTx.jumlah)} — ${rp(lastNotaTx.jumlah * lastNotaTx.harga_jual)}</span>
-          </div>
-          <button class="btn" style="width:auto" onclick="cetakNotaTerakhir()">🖨️ Cetak Nota</button>
-        </div>
-      </div>` : ""}
+      ${lastNotaTx ? notaPreviewHTML(lastNotaTx) : ""}
       <div class="card">
-        <form onsubmit="submitJual();return false">
+        <form onsubmit="tambahKeranjang();return false">
         <div class="field">
-          <label>Pilih barang / unggas</label>
+          <label>Nama pembeli (opsional)</label>
+          <input id="s-pembeli" value="${esc(jualPembeli)}" placeholder="cth: Ibu Siti"
+            autocomplete="off" oninput="jualPembeli=this.value">
+        </div>
+        <div class="field">
+          <label>Pilih barang / ikan</label>
           <select id="s-product" onchange="sellProductId=this.value;renderJual(getSes())">
             <option value="">— pilih barang —</option>
             ${available.map((x) => `<option value="${x.id}" ${x.id === sellProductId ? "selected" : ""}>${esc(x.nama)} (stok ${num(x.stok)})</option>`).join("")}
@@ -369,68 +366,123 @@ function renderJual(ses) {
         ${p ? `
           <div class="field">
             <label>Harga jual satuan</label>
-            <input id="s-price" type="number" min="0" inputmode="numeric" value="${Number(p.harga_jual) || 0}"
-              oninput="updateSellTotal()">
+            <input id="s-price" type="number" min="0" inputmode="numeric" value="${Number(p.harga_jual) || 0}">
             <div class="hint">Boleh diubah per transaksi, misal untuk diskon.</div>
           </div>
           <div class="field">
-            <label>Jumlah terjual</label>
-            <input id="s-qty" type="number" min="1" max="${p.stok}" inputmode="numeric" value="1"
-              oninput="updateSellTotal()">
+            <label>Jumlah</label>
+            <input id="s-qty" type="number" min="1" max="${p.stok}" inputmode="numeric" value="1">
           </div>
-          <div class="card" style="background:var(--card2);margin-bottom:14px">
-            <div class="row-between">
-              <span class="muted">Total</span>
-              <b id="s-total" style="font-size:1.1rem">${rp(p.harga_jual)}</b>
-            </div>
-          </div>
-          <button class="btn" type="submit">✅ Simpan Penjualan</button>
+          <button class="btn secondary" type="submit">＋ Tambah ke Keranjang</button>
         ` : ""}
         </form>
+      </div>
+      <div class="card">
+        <h3>🧺 Keranjang</h3>
+        ${cart.length === 0 ? `<div class="muted" style="margin-bottom:10px">Keranjang masih kosong.</div>` : `
+          <div class="list">${cart.map((c, i) => `
+            <div class="item">
+              <div class="info">
+                <div class="name">${esc(c.nama)}</div>
+                <div class="meta">${num(c.jumlah)} × ${rp(c.harga_jual)}</div>
+              </div>
+              <div class="right">
+                <div class="price">${rp(c.jumlah * c.harga_jual)}</div>
+                <button class="btn small danger" style="margin-top:6px" onclick="hapusKeranjang(${i})">✕</button>
+              </div>
+            </div>`).join("")}
+          </div>
+          <div class="row-between" style="margin:12px 0">
+            <b>Total</b>
+            <b id="cart-total" style="font-size:1.1rem">${rp(cartTotal)}</b>
+          </div>`}
+        <button class="btn" ${cart.length === 0 ? "disabled" : ""} onclick="simpanPenjualan()">Simpan Penjualan</button>
       </div>
       <button class="btn secondary" onclick="location.hash='#/mati'">🐔 Catat Kematian</button>
     </div>
     ${bottomNav(navFor(ses), "#/jual")}
   `);
 }
-function updateSellTotal() {
-  const p = BARANG.find((x) => x.id === sellProductId);
-  if (!p) return;
-  const qty = Number(document.getElementById("s-qty").value) || 0;
-  const price = Number(document.getElementById("s-price").value) || 0;
-  const el = document.getElementById("s-total");
-  if (el) el.textContent = rp(qty * price);
-}
-async function submitJual() {
+let jualPembeli = "";
+let cart = []; // {id, nama, jumlah, harga_jual}
+function tambahKeranjang() {
   const p = BARANG.find((x) => x.id === sellProductId);
   if (!p) { toast("Pilih barang dulu.", true); return; }
   const jumlah = Number(document.getElementById("s-qty").value);
   const harga = Number(document.getElementById("s-price").value);
-  if (!jumlah || jumlah <= 0) { toast("Jumlah terjual tidak valid.", true); return; }
-  if (jumlah > p.stok) { toast("Stok tidak cukup (sisa " + num(p.stok) + ").", true); return; }
+  if (!jumlah || jumlah <= 0) { toast("Jumlah tidak valid.", true); return; }
+  const sudahAda = cart.filter((c) => c.id === p.id).reduce((a, c) => a + c.jumlah, 0);
+  if (jumlah + sudahAda > p.stok) { toast("Stok tidak cukup (sisa " + num(p.stok) + ").", true); return; }
   if (isNaN(harga) || harga < 0) { toast("Harga jual tidak valid.", true); return; }
-  const params = { barang_id: p.id, jumlah, harga_jual: harga };
-  if (navigator.onLine) {
-    try {
-      const j = await api("jual", params);
-      const b = BARANG.find((x) => x.id === p.id);
-      if (b) b.stok = j.stok;
-      setCache(BARANG.slice());
-      lastNotaTx = j.transaksi || {
-        nama_barang: p.nama, jumlah, harga_jual: harga,
-        admin: (getSes() || {}).nama || "", waktu: "",
-      };
-      toast("Penjualan " + p.nama + " × " + jumlah + " tersimpan!");
-      sellProductId = null;
-      route();
-      return;
-    } catch (e) {
-      if (!isNetError(e)) { toast(e.message, true); return; }
-    }
-  }
-  queueMutation("jual", params, p.id, jumlah);
+  cart.push({ id: p.id, nama: p.nama, jumlah, harga_jual: harga });
   sellProductId = null;
-  route();
+  renderJual(getSes());
+}
+function hapusKeranjang(i) {
+  cart.splice(i, 1);
+  renderJual(getSes());
+}
+async function simpanPenjualan() {
+  if (cart.length === 0) { toast("Keranjang masih kosong.", true); return; }
+  // Keranjang multi-item sengaja hanya online — antrean offline untuk
+  // banyak barang sekaligus rawan selisih stok, jadi ditolak di sini.
+  if (!navigator.onLine) { toast("Simpan penjualan butuh koneksi internet.", true); return; }
+  const params = {
+    pembeli: jualPembeli.trim(),
+    items: cart.map((c) => ({ barang_id: c.id, jumlah: c.jumlah, harga_jual: c.harga_jual })),
+  };
+  try {
+    const j = await api("jual_multi", params);
+    lastNotaTx = j.nota || {
+      pembeli: params.pembeli,
+      waktu: "",
+      admin: (getSes() || {}).nama || "",
+      items: cart.map((c) => ({ nama_barang: c.nama, jumlah: c.jumlah, harga_jual: c.harga_jual, subtotal: c.jumlah * c.harga_jual })),
+      total: cart.reduce((a, c) => a + c.jumlah * c.harga_jual, 0),
+    };
+    cart = [];
+    sellProductId = null;
+    toast("Penjualan tersimpan!");
+    lastRefresh = 0;
+    await refreshBarang(true);
+    route();
+  } catch (e) {
+    toast(isNetError(e) ? "Tidak ada koneksi internet." : e.message, true);
+  }
+}
+function notaPreviewHTML(nota) {
+  const items = nota.items || [];
+  const total = nota.total !== undefined
+    ? nota.total
+    : items.reduce((a, x) => a + (Number(x.subtotal) || 0), 0);
+  return `
+  <div class="card" style="border:2px dashed var(--accent);font-family:monospace">
+    <div style="text-align:center">
+      <b style="font-size:1.1rem">Teras Laut Cirebon</b><br>
+      <span class="muted">Nota Penjualan</span>
+    </div>
+    <hr class="sep">
+    <div class="meta">${esc(nota.waktu || "")}</div>
+    <div class="meta">Kasir: ${esc(nota.admin || "-")}</div>
+    ${nota.pembeli ? `<div class="meta">Pembeli: ${esc(nota.pembeli)}</div>` : ""}
+    <hr class="sep">
+    ${items.map((it) => `
+      <div>${esc(it.nama_barang)}</div>
+      <div class="row-between"><span class="muted">${num(it.jumlah)} x ${rp(it.harga_jual)}</span><span>${rp(it.subtotal)}</span></div>
+    `).join("")}
+    <hr class="sep">
+    <div class="row-between"><b>TOTAL</b><b>${rp(total)}</b></div>
+    <hr class="sep">
+    <div style="text-align:center" class="muted">Terima kasih!</div>
+    <div class="btn-row" style="margin-top:10px;font-family:inherit">
+      <button class="btn" onclick="cetakNotaTerakhir()">🖨️ Cetak Nota</button>
+      <button class="btn secondary" onclick="selesaiNota()">Selesai</button>
+    </div>
+  </div>`;
+}
+function selesaiNota() {
+  lastNotaTx = null;
+  renderJual(getSes());
 }
 async function cetakNotaTerakhir() {
   if (!lastNotaTx) return;
@@ -529,6 +581,7 @@ async function renderRiwayat(ses) {
             </div>
             <div class="meta">
               ${fmtDate(t.waktu)}
+              ${t.pembeli ? `<br>• Pembeli: ${esc(t.pembeli)}` : ""}
               ${isBos && t.admin ? `<br>🙋 ${esc(t.admin)}` : ""}
               ${isBos && t.jenis === "mati" ? `<br>Kerugian ${rp(t.jumlah * (t.harga_belanja || 0))}` : ""}
             </div>
@@ -540,7 +593,8 @@ async function renderRiwayat(ses) {
               : `<div class="meta">—</div>`}
           </div>
         </div>`).join("")}
-      </div>`;
+      </div>
+      <div class="muted" style="text-align:center;margin-top:10px">Menampilkan 200 transaksi terakhir.</div>`;
 }
 let RIWAYAT_LAST = [];
 async function cetakNotaRiwayat(id) {
@@ -728,7 +782,7 @@ function bosBarang(ses) {
     ${headerHTML("Data Barang", "Harga belanja hanya terlihat oleh Bos")}
     <div class="content">
       <input class="search-input" placeholder="🔍 Cari barang..." value="${esc(barangSearch)}"
-        oninput="barangSearch=this.value;refreshBarangList()">
+        oninput="barangSearch=this.value;barangShowAll=false;refreshBarangList()">
       <button class="btn" onclick="location.hash='#/bos/barang-form'">＋ Tambah Barang</button>
       <div id="barang-list">${barangListHTML()}</div>
     </div>
@@ -739,11 +793,13 @@ function refreshBarangList() {
   const el = document.getElementById("barang-list");
   if (el) el.innerHTML = barangListHTML();
 }
+let barangShowAll = false;
 function barangListHTML() {
   const q = barangSearch.toLowerCase();
   const list = BARANG.filter((p) => (p.nama + " " + p.id).toLowerCase().includes(q));
   if (list.length === 0) return emptyState("📦", "Belum ada barang. Tambahkan barang pertama Anda!");
-  return `<div class="list">${list.map((p) => `
+  const shown = barangShowAll ? list : list.slice(0, 50);
+  return `<div class="list">${shown.map((p) => `
     <div class="item">
       <div class="info">
         <div class="name">${esc(p.nama)} <span style="opacity:.55;font-size:12px">${esc(p.id)}</span></div>
@@ -759,7 +815,10 @@ function barangListHTML() {
         </div>
       </div>
     </div>`).join("")}
-  </div>`;
+  </div>
+  ${!barangShowAll && list.length > 50
+    ? `<button class="btn secondary" onclick="barangShowAll=true;refreshBarangList()">Tampilkan semua (${num(list.length)})</button>`
+    : ""}`;
 }
 function bosBarangForm(ses, hash) {
   const id = new URLSearchParams(hash.split("?")[1] || "").get("id");
@@ -990,7 +1049,7 @@ function adminStok(ses) {
     ${headerHTML("Stok Barang", "Harga jual & stok — tanpa harga modal")}
     <div class="content">
       <input class="search-input" placeholder="🔍 Cari barang..." value="${esc(stokSearch)}"
-        oninput="stokSearch=this.value;refreshStokList()">
+        oninput="stokSearch=this.value;stokShowAll=false;refreshStokList()">
       <div id="stok-list">${stokListHTML()}</div>
     </div>
     ${bottomNav(ADMIN_NAV, "#/admin/stok")}
@@ -1000,11 +1059,13 @@ function refreshStokList() {
   const el = document.getElementById("stok-list");
   if (el) el.innerHTML = stokListHTML();
 }
+let stokShowAll = false;
 function stokListHTML() {
   const q = stokSearch.toLowerCase();
   const list = BARANG.filter((p) => (p.nama + " " + p.id).toLowerCase().includes(q));
   if (list.length === 0) return emptyState("📦", "Belum ada barang.");
-  return `<div class="list">${list.map((p) => `
+  const shown = stokShowAll ? list : list.slice(0, 50);
+  return `<div class="list">${shown.map((p) => `
     <div class="item">
       <div class="info">
         <div class="name">${esc(p.nama)}</div>
@@ -1014,7 +1075,10 @@ function stokListHTML() {
         <div class="stock ${p.stok === 0 ? "empty" : p.stok <= 5 ? "low" : ""}">${p.stok === 0 ? "Habis" : "Stok " + num(p.stok)}</div>
       </div>
     </div>`).join("")}
-  </div>`;
+  </div>
+  ${!stokShowAll && list.length > 50
+    ? `<button class="btn secondary" onclick="stokShowAll=true;refreshStokList()">Tampilkan semua (${num(list.length)})</button>`
+    : ""}`;
 }
 
 /* =========================================================
