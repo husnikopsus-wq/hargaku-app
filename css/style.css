@@ -214,3 +214,9 @@ hr.sep { border: none; border-top: 1px dashed var(--line); margin: 4px 0; }
   margin: 0 auto 12px;
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
 }
+
+/* Ringkasan keuangan — label kiri rapi, nominal kanan tidak pernah terpotong baris */
+.kv { align-items: flex-start; gap: 14px; margin: 9px 0; }
+.kv > span { flex: 1; min-width: 0; line-height: 1.35; }
+.kv > span .muted { display: block; font-size: .76rem; margin-top: 1px; }
+.kv > b { white-space: nowrap; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }

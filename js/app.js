@@ -1349,13 +1349,13 @@ async function bosLaporan(ses) {
     </div>`}
     <div class="card">
       <h3>💰 Ringkasan Keuangan</h3>
-      <div class="row-between"><span>Omset <span class="muted">— total penjualan</span></span><b>${rp(k.omset !== undefined ? k.omset : totalOmset)}</b></div>
-      <div class="row-between"><span>Pengeluaran kulakan <span class="muted">— belanja stok ikan</span></span><b>${rp(k.pengeluaran_kulakan || 0)}</b></div>
-      <div class="row-between"><span>Pengeluaran lainnya <span class="muted">— biaya operasional</span></span><b>${rp(k.pengeluaran_manual || 0)}</b></div>
+      <div class="row-between kv"><span>Omset <span class="muted">total penjualan</span></span><b>${rp(k.omset !== undefined ? k.omset : totalOmset)}</b></div>
+      <div class="row-between kv"><span>Pengeluaran kulakan <span class="muted">belanja stok ikan</span></span><b>${rp(k.pengeluaran_kulakan || 0)}</b></div>
+      <div class="row-between kv"><span>Pengeluaran lainnya <span class="muted">biaya operasional</span></span><b>${rp(k.pengeluaran_manual || 0)}</b></div>
       <hr class="sep">
-      <div class="row-between"><span><b>Sisa kas</b> <span class="muted">— omset dikurangi semua pengeluaran</span></span><b>${rp(k.sisa_kas || 0)}</b></div>
-      <div class="row-between"><span>Nilai stok saat ini <span class="muted">— ikan yang belum laku, dihitung sebagai aset (snapshot, bukan per periode)</span></span><b>${rp(k.nilai_stok || 0)}</b></div>
-      <div class="row-between"><span>Laba penjualan <span class="muted">— omset dikurangi modal ikan terjual &amp; kerugian</span></span><b>${rp(k.laba_penjualan !== undefined ? k.laba_penjualan : (j.total_untung || 0))}</b></div>
+      <div class="row-between kv"><span><b>Sisa kas</b> <span class="muted">omset dikurangi semua pengeluaran</span></span><b>${rp(k.sisa_kas || 0)}</b></div>
+      <div class="row-between kv"><span>Nilai stok saat ini <span class="muted">ikan yang belum laku, dihitung sebagai aset (bukan per periode)</span></span><b>${rp(k.nilai_stok || 0)}</b></div>
+      <div class="row-between kv"><span>Laba penjualan <span class="muted">omset dikurangi modal ikan terjual &amp; kerugian</span></span><b>${rp(k.laba_penjualan !== undefined ? k.laba_penjualan : (j.total_untung || 0))}</b></div>
     </div>
     <div class="card">
       <h3>💸 Pengeluaran</h3>
