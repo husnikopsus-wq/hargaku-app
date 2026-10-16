@@ -173,7 +173,9 @@ function applyOptimistic(action, params) {
     const b = BARANG.find((x) => x.id === params.barang_id);
     if (b) {
       b.stok = (Number(b.stok) || 0) + (Number(params.jumlah) || 0);
-      b.harga_belanja = Number(params.harga_beli) || 0;
+      // Harga modal hanya ditulis ke cache Bos — cache admin tidak pernah memuatnya
+      const sesKini = getSes();
+      if (sesKini && sesKini.peran === "bos") b.harga_belanja = Number(params.harga_beli) || 0;
     }
   }
   // pengeluaran_add tidak mengubah cache barang — cukup masuk antrean
@@ -432,9 +434,12 @@ function pickerHTML(name) {
   const selId = pickerSelId(name);
   const sel = selId ? pickerSumber(name).find((x) => x.id === selId) || BARANG.find((x) => x.id === selId) : null;
   if (sel) {
-    // Kematian tanpa harga sama sekali. Admin tidak punya harga_belanja —
-    // tapi picker "sm" hanya ada di layar Bos.
-    const harga = name === "jual" ? sel.harga_jual : name === "sm" ? sel.harga_belanja : null;
+    // Kematian tanpa harga sama sekali. Stok masuk: harga modal hanya untuk Bos —
+    // admin tidak pernah melihatnya (cache-nya pun tidak memuatnya).
+    const sesNow = getSes();
+    const harga = name === "jual" ? sel.harga_jual
+      : name === "sm" && sesNow && sesNow.peran === "bos" ? sel.harga_belanja
+      : null;
     return `
       <div class="card" style="background:var(--card2);padding:10px 12px;margin-bottom:4px">
         <div class="row-between">
@@ -1142,6 +1147,10 @@ async function simpanBarang(id) {
 let stokMasukId = null;
 function bosStokMasuk(ses) {
   const p = BARANG.find((x) => x.id === stokMasukId) || null;
+  const isBos = ses.peran === "bos";
+  const hashKembali = isBos ? "#/bos/barang" : "#/admin/stok";
+  // Admin tidak punya harga_belanja di cache — kolom harga mulai KOSONG baginya
+  const prefillHarga = isBos ? (Number(p ? p.harga_belanja : 0) || 0) : "";
   setHTML(`
     ${headerHTML("Stok Masuk (Kulakan)", "Stok bertambah & otomatis tercatat sebagai pengeluaran")}
     <div class="content">
@@ -1159,22 +1168,23 @@ function bosStokMasuk(ses) {
           </div>
           <div class="field">
             <label>Harga beli per unit</label>
-            <input id="sm-price" type="number" min="0" inputmode="numeric" value="${Number(p.harga_belanja) || 0}" oninput="updateStokMasukTotal()">
+            <input id="sm-price" type="number" min="0" inputmode="numeric" value="${prefillHarga}"
+              placeholder="${isBos ? "" : "harga yang Anda bayar"}" oninput="updateStokMasukTotal()">
             <div class="hint">Modal barang akan mengikuti harga kulakan terbaru ini.</div>
           </div>
           <div class="card" style="background:var(--card2);margin-bottom:14px">
             <div class="row-between">
               <span class="muted">Total bayar</span>
-              <b id="sm-total" style="font-size:1.1rem">${rp(Number(p.harga_belanja) || 0)}</b>
+              <b id="sm-total" style="font-size:1.1rem">${rp(Number(prefillHarga) || 0)}</b>
             </div>
           </div>
           <button class="btn" type="submit">📥 Simpan Stok Masuk</button>
         ` : ""}
         </form>
       </div>
-      <button class="btn secondary" onclick="location.hash='#/bos/barang'">← Kembali</button>
+      <button class="btn secondary" onclick="location.hash='${hashKembali}'">← Kembali</button>
     </div>
-    ${bottomNav(BOS_NAV, "#/bos/barang")}
+    ${bottomNav(navFor(ses), hashKembali)}
   `);
 }
 function updateStokMasukTotal() {
@@ -1191,16 +1201,22 @@ async function simpanStokMasuk() {
   if (!jumlah || jumlah <= 0) { toast("Jumlah masuk tidak valid.", true); return; }
   if (isNaN(hargaBeli) || hargaBeli < 0) { toast("Harga beli tidak valid.", true); return; }
   const params = { barang_id: p.id, jumlah, harga_beli: hargaBeli };
+  const hashKembali = (getSes() || {}).peran === "bos" ? "#/bos/barang" : "#/admin/stok";
   if (navigator.onLine) {
     try {
       const j = await api("stok_masuk", params);
       const b = BARANG.find((x) => x.id === p.id);
-      if (b) { b.stok = j.stok; b.harga_belanja = j.harga_belanja; setCache(BARANG.slice()); }
+      // Respons admin tidak membawa harga_belanja — jangan pernah menulis undefined
+      if (b) {
+        b.stok = j.stok;
+        if (j.harga_belanja !== undefined) b.harga_belanja = j.harga_belanja;
+        setCache(BARANG.slice());
+      }
       toast("Stok " + p.nama + " sekarang " + num(j.stok) + ".");
       stokMasukId = null;
       lastRefresh = 0;
       refreshBarang(true);
-      location.hash = "#/bos/barang";
+      location.hash = hashKembali;
       return;
     } catch (e) {
       if (!isNetError(e)) { toast(e.message, true); return; }
@@ -1209,7 +1225,7 @@ async function simpanStokMasuk() {
   }
   queueMutation("stok_masuk", params, "Stok masuk disimpan di antrean — terkirim saat online.");
   stokMasukId = null;
-  location.hash = "#/bos/barang";
+  location.hash = hashKembali;
 }
 
 /* ---------- Kelola Admin (Bos) ---------- */
@@ -1545,17 +1561,43 @@ async function muatPengeluaran() {
     el.innerHTML = `<div class="muted">${esc(isNetError(e) ? "Daftar pengeluaran butuh koneksi internet." : e.message)}</div>`;
   }
 }
+// Form pengeluaran mandiri untuk Admin (tanpa daftar — daftar khusus Bos)
+function formPengeluaran(ses) {
+  setHTML(`
+    ${headerHTML("Catat Pengeluaran", "Biaya operasional di luar kulakan")}
+    <div class="content">
+      <div class="card">
+        <form onsubmit="simpanPengeluaran();return false">
+        <div class="field">
+          <label>Keterangan</label>
+          <input id="x-ket" placeholder="cth: Es balok, solar, pakan" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Nominal</label>
+          <input id="x-jumlah" type="number" min="1" inputmode="numeric" placeholder="cth: 50000">
+        </div>
+        <button class="btn" type="submit">Simpan Pengeluaran</button>
+        </form>
+        <div class="hint">Catatan pengeluaran hanya bisa dilihat Bos.</div>
+      </div>
+      <button class="btn secondary" onclick="location.hash='#/admin/stok'">← Kembali</button>
+    </div>
+    ${bottomNav(ADMIN_NAV, "#/admin/stok")}
+  `);
+}
 async function simpanPengeluaran() {
   const ket = document.getElementById("x-ket").value.trim();
   const jumlah = Number(document.getElementById("x-jumlah").value);
   if (!ket) { toast("Keterangan wajib diisi.", true); return; }
   if (isNaN(jumlah) || jumlah <= 0) { toast("Nominal pengeluaran harus angka lebih dari nol.", true); return; }
   const params = { keterangan: ket, jumlah };
+  const ses = getSes();
+  const kembali = () => (ses && ses.peran === "bos" ? bosLaporan(ses) : formPengeluaran(ses));
   if (navigator.onLine) {
     try {
       await api("pengeluaran_add", params);
       toast("Pengeluaran tercatat.");
-      bosLaporan(getSes());
+      kembali();
       return;
     } catch (e) {
       if (!isNetError(e)) { toast(e.message, true); return; }
@@ -1563,7 +1605,7 @@ async function simpanPengeluaran() {
     }
   }
   queueMutation("pengeluaran_add", params, "Pengeluaran disimpan di antrean — terkirim saat online.");
-  bosLaporan(getSes());
+  kembali();
 }
 async function hapusPengeluaran(id) {
   if (!confirm("Hapus catatan pengeluaran ini? Stok barang tidak berubah.")) return;
@@ -1652,6 +1694,8 @@ function renderAdmin(hash, ses) {
   if (hash === "#/jual") return renderJual(ses);
   if (hash === "#/mati") return renderMati(ses);
   if (hash === "#/admin/stok") return adminStok(ses);
+  if (hash === "#/stok-masuk") return bosStokMasuk(ses);
+  if (hash === "#/pengeluaran") return formPengeluaran(ses);
   if (hash === "#/riwayat") return renderRiwayat(ses);
   if (hash === "#/pengaturan") return renderPengaturan(ses);
   location.hash = "#/jual";
@@ -1661,6 +1705,10 @@ function adminStok(ses) {
   setHTML(`
     ${headerHTML("Stok Barang", "Harga jual & stok — tanpa harga modal")}
     <div class="content">
+      <div class="btn-row" style="margin-bottom:10px">
+        <button class="btn secondary" onclick="location.hash='#/stok-masuk'">📥 Stok Masuk</button>
+        <button class="btn secondary" onclick="location.hash='#/pengeluaran'">💸 Pengeluaran</button>
+      </div>
       <input class="search-input" placeholder="🔍 Cari barang..." value="${esc(stokSearch)}"
         oninput="stokSearch=this.value;stokShowAll=false;refreshStokList()">
       <div id="stok-list">${stokListHTML()}</div>

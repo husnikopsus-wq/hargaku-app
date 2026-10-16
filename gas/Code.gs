@@ -603,7 +603,8 @@ function catatPengeluaran(user, jenis, keterangan, jumlah) {
   ]);
 }
 function doStokMasuk(user, p) {
-  var deny = needBos(user); if (deny) return deny;
+  // Admin boleh mencatat kulakan (mereka yang membayar), tapi harga modal
+  // TIDAK PERNAH dikembalikan ke admin — bos saja yang menerima harga_belanja.
   var b = findBarang(p.barang_id);
   if (!b) return { ok: false, error: "Barang tidak ditemukan." };
   var jumlah = Math.floor(Number(p.jumlah));
@@ -615,10 +616,11 @@ function doStokMasuk(user, p) {
   sheet("Barang").getRange(b.row, 3).setValue(hargaBeli);
   sheet("Barang").getRange(b.row, 5).setValue(stokBaru);
   catatPengeluaran(user, "kulakan", "Kulakan: " + b.nama + " ×" + jumlah, jumlah * hargaBeli);
-  return { ok: true, stok: stokBaru, harga_belanja: hargaBeli };
+  if (user.peran === "bos") return { ok: true, stok: stokBaru, harga_belanja: hargaBeli };
+  return { ok: true, stok: stokBaru };
 }
 function doPengeluaranAdd(user, p) {
-  var deny = needBos(user); if (deny) return deny;
+  // Admin juga boleh mencatat pengeluaran — 'oleh' tetap mencatat siapa penginputnya
   var ket = String(p.keterangan || "").trim();
   var jumlah = Number(p.jumlah);
   if (!ket) return { ok: false, error: "Keterangan pengeluaran wajib diisi." };
