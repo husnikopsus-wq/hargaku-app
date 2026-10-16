@@ -1041,6 +1041,7 @@ function barangListHTML() {
         <div class="stock ${p.stok === 0 ? "empty" : p.stok <= 5 ? "low" : ""}">Stok ${num(p.stok)}</div>
         <div style="margin-top:6px">
           <button class="btn small secondary" onclick="location.hash='#/bos/barang-form?id=${p.id}'">Edit</button>
+          <button class="btn small danger" style="margin-top:6px" onclick="hapusBarang('${p.id}')">🗑️</button>
         </div>
       </div>
     </div>`).join("")}
@@ -1048,6 +1049,22 @@ function barangListHTML() {
   ${!barangShowAll && list.length > 50
     ? `<button class="btn secondary" onclick="barangShowAll=true;refreshBarangList()">Tampilkan semua (${num(list.length)})</button>`
     : ""}`;
+}
+async function hapusBarang(id) {
+  const b = BARANG.find((x) => x.id === id);
+  if (!b) return;
+  // Penghapusan bersifat struktural — sengaja hanya online, tidak masuk antrean
+  if (!navigator.onLine) { toast("Hapus barang butuh koneksi internet.", true); return; }
+  if (!confirm('Hapus barang "' + b.nama + '"? Riwayat & laporan transaksinya tetap tersimpan.')) return;
+  try {
+    await api("barang_hapus", { id });
+    toast("Barang " + b.nama + " dihapus.");
+    lastRefresh = 0;
+    await refreshBarang(true);
+    refreshBarangList();
+  } catch (e) {
+    toast(isNetError(e) ? "Tidak ada koneksi internet." : e.message, true);
+  }
 }
 function bosBarangForm(ses, hash) {
   const id = new URLSearchParams(hash.split("?")[1] || "").get("id");
@@ -1381,7 +1398,7 @@ function pengeluaranListHTML(list) {
       </div>
       <div class="right">
         <div class="price">${rp(x.jumlah)}</div>
-        ${x.jenis === "manual" ? `<button class="btn small danger" style="margin-top:6px" onclick="hapusPengeluaran('${x.id}')">🗑️</button>` : ""}
+        <button class="btn small danger" style="margin-top:6px" onclick="hapusPengeluaran('${x.id}')">🗑️</button>
       </div>
     </div>`).join("")}
   </div>`;
@@ -1421,7 +1438,7 @@ async function simpanPengeluaran() {
   bosLaporan(getSes());
 }
 async function hapusPengeluaran(id) {
-  if (!confirm("Hapus catatan pengeluaran ini? Stok tidak berubah.")) return;
+  if (!confirm("Hapus catatan pengeluaran ini? Stok barang tidak berubah.")) return;
   try {
     await api("pengeluaran_hapus", { id });
     toast("Catatan pengeluaran dihapus.");
@@ -1463,8 +1480,9 @@ function pelangganListHTML() {
   const q = pelangganSearch.toLowerCase();
   const list = PELANGGAN.filter((c) => (c.nama + " " + c.no_hp).toLowerCase().includes(q));
   if (list.length === 0) return emptyState("👥", "Belum ada pelanggan tercatat.");
+  PELANGGAN_VIEW = list;
   const shown = pelangganShowAll ? list : list.slice(0, 50);
-  return `<div class="list">${shown.map((c) => `
+  return `<div class="list">${shown.map((c, i) => `
     <div class="item">
       <div class="info">
         <div class="name">${esc(c.nama || c.no_hp || "-")}</div>
@@ -1473,12 +1491,30 @@ function pelangganListHTML() {
           ${num(c.jumlah_transaksi)}× transaksi • Terakhir ${esc(c.terakhir_beli || "-")}
         </div>
       </div>
-      <div class="right"><div class="price">${rp(c.total_belanja)}</div></div>
+      <div class="right">
+        <div class="price">${rp(c.total_belanja)}</div>
+        <button class="btn small danger" style="margin-top:6px" onclick="hapusPelanggan(${i})">🗑️</button>
+      </div>
     </div>`).join("")}
   </div>
   ${!pelangganShowAll && list.length > 50
     ? `<button class="btn secondary" onclick="pelangganShowAll=true;refreshPelangganList()">Tampilkan semua (${num(list.length)})</button>`
     : ""}`;
+}
+let PELANGGAN_VIEW = [];
+async function hapusPelanggan(i) {
+  const c = PELANGGAN_VIEW[i];
+  if (!c) return;
+  // Penghapusan bersifat struktural — sengaja hanya online, tidak masuk antrean
+  if (!navigator.onLine) { toast("Hapus pelanggan butuh koneksi internet.", true); return; }
+  if (!confirm('Hapus pelanggan "' + (c.nama || c.no_hp) + '" dari database?')) return;
+  try {
+    await api("pelanggan_hapus", { nama: c.nama, no_hp: c.no_hp });
+    toast("Pelanggan " + (c.nama || c.no_hp) + " dihapus.");
+    bosPelanggan(getSes());
+  } catch (e) {
+    toast(isNetError(e) ? "Tidak ada koneksi internet." : e.message, true);
+  }
 }
 
 /* =========================================================

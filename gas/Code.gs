@@ -178,6 +178,8 @@ function handle(p) {
       case "transaksi_edit":  return withLock(function () { return doTransaksiEdit(user, p); });
       case "transaksi_hapus": return withLock(function () { return doTransaksiHapus(user, p); });
       case "stok_masuk":      return withLock(function () { return doStokMasuk(user, p); });
+      case "barang_hapus":    return withLock(function () { return doBarangHapus(user, p); });
+      case "pelanggan_hapus": return withLock(function () { return doPelangganHapus(user, p); });
       case "pengeluaran_add":    return withLock(function () { return doPengeluaranAdd(user, p); });
       case "pengeluaran_list":   return out(doPengeluaranList(user));
       case "pengeluaran_hapus":  return withLock(function () { return doPengeluaranHapus(user, p); });
@@ -275,6 +277,15 @@ function doBarangUpdate(user, p) {
   // Perubahan di sini adalah koreksi data — TIDAK dicatat sebagai pengeluaran.
   // Penambahan stok (kulakan) wajib lewat aksi stok_masuk agar kas tercatat.
   sheet("Barang").getRange(b.row, 1, 1, 5).setValues([[b.id, v.nama, v.belanja, v.jual, v.stok]]);
+  return { ok: true };
+}
+function doBarangHapus(user, p) {
+  var deny = needBos(user); if (deny) return deny;
+  var b = findBarang(p.id || p.barang_id);
+  if (!b) return { ok: false, error: "Barang tidak ditemukan." };
+  // Hanya baris Barang yang dihapus — Transaksi TIDAK disentuh: laporan
+  // memakai snapshot nama_barang per baris, jadi riwayat tetap utuh.
+  sheet("Barang").deleteRow(b.row);
   return { ok: true };
 }
 
@@ -569,6 +580,21 @@ function doPelangganList(user) {
   list.sort(function (a, b) { return b.total_belanja - a.total_belanja; });
   return { ok: true, pelanggan: list };
 }
+function doPelangganHapus(user, p) {
+  var deny = needBos(user); if (deny) return deny;
+  var nama = String(p.nama || "");
+  var noHp = String(p.no_hp || "");
+  var s = sheet("Pelanggan");
+  var v = s.getDataRange().getValues();
+  for (var i = 1; i < v.length; i++) {
+    if (String(v[i][0] || "").toLowerCase() === nama.toLowerCase() &&
+        String(v[i][1] || "").toLowerCase() === noHp.toLowerCase()) {
+      s.deleteRow(i + 1);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: "Pelanggan tidak ditemukan." };
+}
 
 /* ---------------- Pengeluaran & stok masuk (khusus Bos) ---------------- */
 function catatPengeluaran(user, jenis, keterangan, jumlah) {
@@ -624,9 +650,8 @@ function doPengeluaranHapus(user, p) {
   var v = s.getDataRange().getValues();
   for (var i = 1; i < v.length; i++) {
     if (String(v[i][0]) === String(p.id || "")) {
-      if (String(v[i][2]) !== "manual") {
-        return { ok: false, error: "Catatan kulakan tidak bisa dihapus — terhubung ke stok." };
-      }
+      // Menghapus catatan pengeluaran (manual maupun kulakan) hanya menghapus
+      // catatan kas — stok barang TIDAK pernah berubah karena ini.
       s.deleteRow(i + 1);
       return { ok: true };
     }
