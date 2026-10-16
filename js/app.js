@@ -398,6 +398,88 @@ let sellProductId = null;
 let deathProductId = null;
 let lastNotaTx = null; // transaksi terakhir berhasil — untuk tombol Cetak Nota
 
+/* ---------- Pemilih barang dengan pencarian (Jual & Stok Masuk) ---------- */
+// State pencarian per layar; pilihan tetap di sellProductId / stokMasukId.
+const PICKERS = {
+  jual: { q: "", open: false },
+  sm: { q: "", open: false },
+};
+function pickerSumber(name) {
+  // Jual: hanya yang berstok. Stok masuk: semua — restok barang habis memang tujuannya.
+  return name === "jual" ? BARANG.filter((x) => Number(x.stok) > 0) : BARANG;
+}
+function pickerHasilHTML(name) {
+  const q = PICKERS[name].q.toLowerCase();
+  const hasil = pickerSumber(name).filter((x) => (x.nama + " " + x.id).toLowerCase().includes(q));
+  if (!hasil.length) return `<div class="muted" style="padding:8px 4px">Tidak ada barang cocok.</div>`;
+  return hasil.map((x) => `
+    <div class="item" style="cursor:pointer" onclick="pickerPilih('${name}','${x.id}')">
+      <div class="info">
+        <div class="name">${esc(x.nama)}</div>
+        <div class="meta">${esc(x.id)}</div>
+      </div>
+      <div class="right">
+        <div class="stock ${Number(x.stok) === 0 ? "empty" : Number(x.stok) <= 5 ? "low" : ""}">Stok ${num(x.stok)}</div>
+      </div>
+    </div>`).join("");
+}
+function pickerHTML(name) {
+  const selId = name === "jual" ? sellProductId : stokMasukId;
+  const sel = selId ? pickerSumber(name).find((x) => x.id === selId) || BARANG.find((x) => x.id === selId) : null;
+  if (sel) {
+    // Admin tidak punya harga_belanja — tapi picker "sm" hanya ada di layar Bos
+    const harga = name === "jual" ? sel.harga_jual : sel.harga_belanja;
+    return `
+      <div class="card" style="background:var(--card2);padding:10px 12px;margin-bottom:4px">
+        <div class="row-between">
+          <div>
+            <b>${esc(sel.nama)}</b><br>
+            <span class="muted">${esc(sel.id)} • Stok ${num(sel.stok)} • ${rp(harga || 0)}</span>
+          </div>
+          <button type="button" class="btn small secondary" onclick="pickerHapus('${name}')">✕</button>
+        </div>
+      </div>`;
+  }
+  return `
+    <input class="search-input" placeholder="🔍 Cari barang / kode..." value="${esc(PICKERS[name].q)}"
+      autocomplete="off"
+      onfocus="pickerFocus('${name}')"
+      oninput="pickerInput('${name}', this.value)"
+      onkeydown="return pickerKey(event, '${name}')">
+    <div id="${name}-hasil" class="list" style="max-height:340px;overflow-y:auto;margin-top:6px">
+      ${PICKERS[name].open || PICKERS[name].q ? pickerHasilHTML(name) : ""}
+    </div>`;
+}
+function pickerInput(name, val) {
+  PICKERS[name].q = val;
+  PICKERS[name].open = true;
+  const el = document.getElementById(name + "-hasil");
+  if (el) el.innerHTML = pickerHasilHTML(name);
+}
+function pickerFocus(name) {
+  PICKERS[name].open = true;
+  const el = document.getElementById(name + "-hasil");
+  if (el) el.innerHTML = pickerHasilHTML(name);
+}
+function pickerKey(e, name) {
+  if (e.key !== "Enter") return true;
+  e.preventDefault(); // Enter di kolom cari TIDAK boleh mensubmit form
+  const q = PICKERS[name].q.toLowerCase();
+  const hasil = pickerSumber(name).filter((x) => (x.nama + " " + x.id).toLowerCase().includes(q));
+  if (hasil.length) pickerPilih(name, hasil[0].id); // Enter memilih hasil pertama
+  return false;
+}
+function pickerPilih(name, id) {
+  PICKERS[name].q = "";
+  PICKERS[name].open = false;
+  if (name === "jual") { sellProductId = id; renderJual(getSes()); }
+  else { stokMasukId = id; bosStokMasuk(getSes()); }
+}
+function pickerHapus(name) {
+  if (name === "jual") { sellProductId = null; renderJual(getSes()); }
+  else { stokMasukId = null; bosStokMasuk(getSes()); }
+}
+
 function renderJual(ses) {
   const available = BARANG.filter((p) => Number(p.stok) > 0);
   const p = available.find((x) => x.id === sellProductId) || null;
@@ -420,10 +502,7 @@ function renderJual(ses) {
         </div>
         <div class="field">
           <label>Pilih barang / ikan</label>
-          <select id="s-product" onchange="sellProductId=this.value;renderJual(getSes())">
-            <option value="">— pilih barang —</option>
-            ${available.map((x) => `<option value="${x.id}" ${x.id === sellProductId ? "selected" : ""}>${esc(x.nama)} (stok ${num(x.stok)})</option>`).join("")}
-          </select>
+          ${pickerHTML("jual")}
           ${available.length === 0 ? `<div class="hint">Tidak ada barang berstok. Minta Bos menambah barang.</div>` : ""}
         </div>
         ${p ? `
@@ -1048,10 +1127,7 @@ function bosStokMasuk(ses) {
         <form onsubmit="simpanStokMasuk();return false">
         <div class="field">
           <label>Pilih barang / ikan</label>
-          <select id="sm-product" onchange="stokMasukId=this.value;bosStokMasuk(getSes())">
-            <option value="">— pilih barang —</option>
-            ${BARANG.map((x) => `<option value="${x.id}" ${x.id === stokMasukId ? "selected" : ""}>${esc(x.nama)} (stok ${num(x.stok)})</option>`).join("")}
-          </select>
+          ${pickerHTML("sm")}
           ${BARANG.length === 0 ? `<div class="hint">Belum ada barang. Tambahkan dulu lewat menu Barang.</div>` : ""}
         </div>
         ${p ? `
