@@ -83,6 +83,11 @@ let lastRefresh = 0;
 let refreshing = false;
 async function refreshBarang(force) {
   if (!navigator.onLine || refreshing) return;
+  // ATURAN: selama antrean belum kosong, refresh dilarang menimpa cache —
+  // cache masih memuat data optimis (stok terpotong / barang "lokal-") yang
+  // belum diakui server. Refresh hanya jalan lagi tepat setelah flushOutbox
+  // mengosongkan antrean (dipanggil dari blok finally-nya).
+  if (getOutbox().length > 0) return;
   if (!force && Date.now() - lastRefresh < 15000) return;
   refreshing = true;
   lastRefresh = Date.now();
@@ -100,6 +105,8 @@ async function flushOutbox() {
   flushing = true;
   updatePill();
   try {
+    // FIFO: antrean terdepan dulu — barang_add selalu mendahului penjualan
+    // atas barang "lokal-" buatannya, supaya server sudah mengenal ID-nya.
     while (getOutbox().length > 0) {
       const item = getOutbox()[0];
       try {
@@ -107,26 +114,70 @@ async function flushOutbox() {
         setOutbox(getOutbox().slice(1));
       } catch (e) {
         if (isNetError(e)) break; // masih offline — coba lagi nanti
-        // Server menolak permanen (misal stok habis) — buang agar tidak nyangkut
+        // Server menolak permanen (misal stok bentrok) — buang agar tidak nyangkut
         setOutbox(getOutbox().slice(1));
-        toast("Satu catatan antrean gagal dikirim: " + e.message, true);
+        const nm = namaAntrean(item);
+        toast("Antrean gagal: " + item.action + (nm ? " " + nm : "") + " — " + e.message, true);
       }
     }
   } finally {
     flushing = false;
     lastRefresh = 0;
-    await refreshBarang(true);
+    await refreshBarang(true); // aman: hanya benar-benar jalan bila antrean sudah kosong
     updatePill();
   }
 }
-function queueMutation(action, params, barangId, jumlah) {
+// Nama barang untuk pesan gagal antrean — dari params atau cache.
+function namaAntrean(item) {
+  const p = item.params || {};
+  if (p.barang_nama) return p.barang_nama;
+  if (p.barang_id) {
+    const b = BARANG.find((x) => x.id === p.barang_id);
+    if (b) return b.nama;
+  }
+  if (p.items && p.items.length) {
+    const b = BARANG.find((x) => x.id === p.items[0].barang_id);
+    if (b) return b.nama + (p.items.length > 1 ? " dkk" : "");
+  }
+  return "";
+}
+// Terapkan perubahan ke cache lokal sebelum server mengonfirmasi.
+function applyOptimistic(action, params) {
+  if (action === "jual" || action === "mati") {
+    const b = BARANG.find((x) => x.id === params.barang_id);
+    if (b) b.stok = Math.max(0, (Number(b.stok) || 0) - (Number(params.jumlah) || 0));
+  } else if (action === "jual_multi") {
+    (params.items || []).forEach((it) => {
+      const b = BARANG.find((x) => x.id === it.barang_id);
+      if (b) b.stok = Math.max(0, (Number(b.stok) || 0) - (Number(it.jumlah) || 0));
+    });
+  } else if (action === "barang_add") {
+    // ID lokal dikirim juga ke server (barang_id) supaya ID-nya sama persis
+    if (!params.barang_id) params.barang_id = "lokal-" + Date.now();
+    BARANG.push({
+      id: params.barang_id,
+      nama: params.barang_nama,
+      harga_belanja: Number(params.harga_belanja) || 0,
+      harga_jual: Number(params.harga_jual) || 0,
+      stok: Number(params.stok) || 0,
+    });
+  } else if (action === "barang_update") {
+    const b = BARANG.find((x) => x.id === params.id);
+    if (b) {
+      b.nama = params.barang_nama;
+      b.harga_belanja = Number(params.harga_belanja) || 0;
+      b.harga_jual = Number(params.harga_jual) || 0;
+      b.stok = Number(params.stok) || 0;
+    }
+  }
+  setCache(BARANG.slice());
+}
+function queueMutation(action, params, msg) {
+  applyOptimistic(action, params);
   const q = getOutbox();
   q.push({ action, params, at: Date.now() });
-  setOutbox(q);
-  // Kurangi stok di cache secara optimis supaya layar langsung masuk akal
-  const b = BARANG.find((x) => x.id === barangId);
-  if (b) { b.stok = Math.max(0, (Number(b.stok) || 0) - jumlah); setCache(BARANG.slice()); }
-  toast("Koneksi terputus — catatan disimpan, menunggu sinkronisasi.");
+  setOutbox(q); // pil status diperbarui di dalam setOutbox
+  toast(msg || "Disimpan di antrean — terkirim saat online.");
 }
 
 /* ---------------- Toast & pil status ---------------- */
@@ -428,36 +479,61 @@ function hapusKeranjang(i) {
   cart.splice(i, 1);
   renderJual(getSes());
 }
+// Nota darurat dari data lokal — dipakai saat offline (atau bila server lama
+// belum mengembalikan nota), supaya kartu pratinjau & 🖨️ tetap jalan.
+function notaLokal(params) {
+  const items = (params.items || []).map((it) => {
+    const b = BARANG.find((x) => x.id === it.barang_id);
+    return {
+      nama_barang: b ? b.nama : String(it.barang_id),
+      jumlah: it.jumlah,
+      harga_jual: it.harga_jual,
+      subtotal: it.jumlah * it.harga_jual,
+    };
+  });
+  const d = new Date();
+  const p2 = (n) => String(n).padStart(2, "0");
+  return {
+    pembeli: params.pembeli || "",
+    waktu: p2(d.getDate()) + "/" + p2(d.getMonth() + 1) + "/" + d.getFullYear() +
+      " " + p2(d.getHours()) + ":" + p2(d.getMinutes()),
+    admin: (getSes() || {}).nama || "",
+    items,
+    total: items.reduce((a, x) => a + x.subtotal, 0),
+  };
+}
 async function simpanPenjualan() {
   if (cart.length === 0) { toast("Keranjang masih kosong.", true); return; }
-  // Keranjang multi-item sengaja hanya online — antrean offline untuk
-  // banyak barang sekaligus rawan selisih stok, jadi ditolak di sini.
-  if (!navigator.onLine) { toast("Simpan penjualan butuh koneksi internet.", true); return; }
   const params = {
     pembeli: jualPembeli.trim(),
     no_hp: jualNoHp.trim(),
     items: cart.map((c) => ({ barang_id: c.id, jumlah: c.jumlah, harga_jual: c.harga_jual })),
   };
-  try {
-    const j = await api("jual_multi", params);
-    lastNotaTx = j.nota || {
-      pembeli: params.pembeli,
-      waktu: "",
-      admin: (getSes() || {}).nama || "",
-      items: cart.map((c) => ({ nama_barang: c.nama, jumlah: c.jumlah, harga_jual: c.harga_jual, subtotal: c.jumlah * c.harga_jual })),
-      total: cart.reduce((a, c) => a + c.jumlah * c.harga_jual, 0),
-    };
-    cart = [];
-    sellProductId = null;
-    jualPembeli = "";
-    jualNoHp = "";
-    toast("Penjualan tersimpan!");
-    lastRefresh = 0;
-    await refreshBarang(true);
-    route();
-  } catch (e) {
-    toast(isNetError(e) ? "Tidak ada koneksi internet." : e.message, true);
+  if (navigator.onLine) {
+    try {
+      const j = await api("jual_multi", params);
+      lastNotaTx = j.nota || notaLokal(params);
+      cart = [];
+      sellProductId = null;
+      jualPembeli = "";
+      jualNoHp = "";
+      toast("Penjualan tersimpan!");
+      lastRefresh = 0;
+      await refreshBarang(true);
+      route();
+      return;
+    } catch (e) {
+      if (!isNetError(e)) { toast(e.message, true); return; }
+      // Koneksi putus di tengah jalan — lanjut ke jalur antrean di bawah
+    }
   }
+  queueMutation("jual_multi", params, "Penjualan disimpan di antrean — terkirim saat online.");
+  lastNotaTx = notaLokal(params);
+  cart = [];
+  sellProductId = null;
+  jualPembeli = "";
+  jualNoHp = "";
+  route();
 }
 function notaPreviewHTML(nota) {
   const items = nota.items || [];
@@ -554,7 +630,7 @@ async function submitMati() {
       if (!isNetError(e)) { toast(e.message, true); return; }
     }
   }
-  queueMutation("mati", params, p.id, jumlah);
+  queueMutation("mati", params, "Kematian disimpan di antrean — terkirim saat online.");
   deathProductId = null;
   route();
 }
@@ -860,7 +936,7 @@ function barangListHTML() {
   return `<div class="list">${shown.map((p) => `
     <div class="item">
       <div class="info">
-        <div class="name">${esc(p.nama)} <span style="opacity:.55;font-size:12px">${esc(p.id)}</span></div>
+        <div class="name">${esc(p.nama)} <span style="opacity:.55;font-size:12px">${esc(p.id)}</span>${String(p.id).indexOf("lokal-") === 0 ? ` <span class="badge warn">⏳ menunggu</span>` : ""}</div>
         <div class="meta">
           Modal ${rp(p.harga_belanja)} • Jual ${rp(p.harga_jual)}<br>
           Untung/unit ${rp(p.harga_jual - p.harga_belanja)}
@@ -930,17 +1006,24 @@ async function simpanBarang(id) {
   if (isNaN(params.harga_belanja) || isNaN(params.harga_jual) || isNaN(params.stok)) {
     toast("Harga & stok harus angka.", true); return;
   }
-  if (!navigator.onLine) { toast("Kelola barang butuh koneksi internet.", true); return; }
-  try {
-    if (id) await api("barang_update", Object.assign({ id }, params));
-    else await api("barang_add", params);
-    toast(id ? "Barang diperbarui." : "Barang ditambahkan.");
-    lastRefresh = 0;
-    await refreshBarang(true);
-    location.hash = "#/bos/barang";
-  } catch (e) {
-    toast(isNetError(e) ? "Tidak ada koneksi internet." : e.message, true);
+  const action = id ? "barang_update" : "barang_add";
+  const full = id ? Object.assign({ id }, params) : params;
+  if (navigator.onLine) {
+    try {
+      await api(action, full);
+      toast(id ? "Barang diperbarui." : "Barang ditambahkan.");
+      lastRefresh = 0;
+      await refreshBarang(true);
+      location.hash = "#/bos/barang";
+      return;
+    } catch (e) {
+      if (!isNetError(e)) { toast(e.message, true); return; }
+      // Koneksi putus di tengah jalan — lanjut ke jalur antrean di bawah
+    }
   }
+  // Offline: antrekan; barang baru langsung tampil dengan ID "lokal-..."
+  queueMutation(action, full, "Disimpan di antrean — terkirim saat online.");
+  location.hash = "#/bos/barang";
 }
 
 /* ---------- Kelola Admin (Bos) ---------- */
@@ -1180,7 +1263,7 @@ function stokListHTML() {
   return `<div class="list">${shown.map((p) => `
     <div class="item">
       <div class="info">
-        <div class="name">${esc(p.nama)}</div>
+        <div class="name">${esc(p.nama)}${String(p.id).indexOf("lokal-") === 0 ? ` <span class="badge warn">⏳ menunggu</span>` : ""}</div>
         <div class="meta">Harga jual ${rp(p.harga_jual)}</div>
       </div>
       <div class="right">

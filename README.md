@@ -136,7 +136,14 @@ Di kedua opsi, browser HP akan menawarkan **"Tambahkan ke layar utama"** — ter
 
 - Pil status di atas layar menunjukkan 🟢 Online / 🔴 Offline / 🟡 antrean menunggu.
 - Catatan **Jual/Kematian** tetap bisa diinput saat offline — masuk antrean **"Menunggu sinkronisasi"** dan terkirim otomatis saat online lagi, atau tekan tombol **Sinkronkan** pada pil status.
+- **Tambah/ubah barang** (Bos) juga bisa saat offline — barang baru langsung tampil di daftar dengan lencana **⏳ menunggu**, dan nota penjualan offline tetap bisa dicetak (Bluetooth tidak butuh internet).
 - Daftar barang & stok tetap terlihat dari cache terakhir.
+
+#### Catatan keterbatasan mode offline
+
+- Barang yang dibuat saat offline belum bisa dijual sebelum sempat sinkron — server belum mengenal ID-nya (antrean dikirim berurutan, jadi biasanya aman setelah online).
+- Penjualan offline bisa **ditolak server** saat sinkronisasi bila stok bentrok (misal barang yang sama dijual admin lain duluan). Antrean yang gagal dibuang dan diberi tahu lewat toast — koreksi lewat tombol ✏️/🗑️ di Riwayat.
+- Selama masih ada antrean, daftar barang menampilkan data optimis lokal; data server baru menggantikannya setelah semua antrean terkirim.
 
 ---
 
