@@ -33,7 +33,8 @@ var HEADERS = {
   Users:     ["nama", "pin_hash", "peran"],
   Barang:    ["id", "nama", "harga_belanja", "harga_jual", "stok"],
   Transaksi: ["id", "waktu", "jenis", "barang_id", "nama_barang", "jumlah", "harga_jual", "harga_belanja", "admin", "pembeli", "no_hp"],
-  Pelanggan: ["nama", "no_hp", "jumlah_transaksi", "total_belanja", "terakhir_beli"]
+  Pelanggan: ["nama", "no_hp", "jumlah_transaksi", "total_belanja", "terakhir_beli"],
+  Pengeluaran: ["id", "waktu", "jenis", "keterangan", "jumlah", "oleh"]
 };
 
 /* ---------------- Util sheet ---------------- */
@@ -79,7 +80,7 @@ function setConfig(key, value) {
 
 /* ---------------- Setup awal (jalankan sekali) ---------------- */
 function setup() {
-  var names = ["Config", "Users", "Barang", "Transaksi", "Pelanggan"];
+  var names = ["Config", "Users", "Barang", "Transaksi", "Pelanggan", "Pengeluaran"];
   for (var i = 0; i < names.length; i++) sheet(names[i]);
 
   var key = getConfig("APP_KEY");
@@ -172,6 +173,10 @@ function handle(p) {
       case "pelanggan_list":  return out(doPelangganList(user));
       case "transaksi_edit":  return withLock(function () { return doTransaksiEdit(user, p); });
       case "transaksi_hapus": return withLock(function () { return doTransaksiHapus(user, p); });
+      case "stok_masuk":      return withLock(function () { return doStokMasuk(user, p); });
+      case "pengeluaran_add":    return withLock(function () { return doPengeluaranAdd(user, p); });
+      case "pengeluaran_list":   return out(doPengeluaranList(user));
+      case "pengeluaran_hapus":  return withLock(function () { return doPengeluaranHapus(user, p); });
       default:                return out({ ok: false, error: "Aksi tidak dikenal: " + action });
     }
   } catch (err) {
@@ -242,6 +247,10 @@ function doBarangAdd(user, p) {
     id = Utilities.getUuid();
   }
   sheet("Barang").appendRow([id, v.nama, v.belanja, v.jual, v.stok]);
+  // Stok awal bernilai modal — catat otomatis sebagai pengeluaran kulakan
+  if (v.stok > 0 && v.belanja > 0) {
+    catatPengeluaran(user, "kulakan", "Stok awal: " + v.nama + " ×" + v.stok, v.stok * v.belanja);
+  }
   return { ok: true, id: id };
 }
 function doBarangUpdate(user, p) {
@@ -250,6 +259,8 @@ function doBarangUpdate(user, p) {
   if (!b) return { ok: false, error: "Barang tidak ditemukan." };
   var v = validAngkaBarang(p);
   if (v.error) return { ok: false, error: v.error };
+  // Perubahan di sini adalah koreksi data — TIDAK dicatat sebagai pengeluaran.
+  // Penambahan stok (kulakan) wajib lewat aksi stok_masuk agar kas tercatat.
   sheet("Barang").getRange(b.row, 1, 1, 5).setValues([[b.id, v.nama, v.belanja, v.jual, v.stok]]);
   return { ok: true };
 }
@@ -545,6 +556,70 @@ function doPelangganList(user) {
   return { ok: true, pelanggan: list };
 }
 
+/* ---------------- Pengeluaran & stok masuk (khusus Bos) ---------------- */
+function catatPengeluaran(user, jenis, keterangan, jumlah) {
+  sheet("Pengeluaran").appendRow([
+    Utilities.getUuid(), new Date(), jenis, String(keterangan || ""), Number(jumlah) || 0, user.nama
+  ]);
+}
+function doStokMasuk(user, p) {
+  var deny = needBos(user); if (deny) return deny;
+  var b = findBarang(p.barang_id);
+  if (!b) return { ok: false, error: "Barang tidak ditemukan." };
+  var jumlah = Math.floor(Number(p.jumlah));
+  if (!jumlah || jumlah <= 0) return { ok: false, error: "Jumlah masuk harus angka lebih dari nol." };
+  var hargaBeli = Number(p.harga_beli);
+  if (isNaN(hargaBeli) || hargaBeli < 0) return { ok: false, error: "Harga beli tidak valid." };
+  var stokBaru = b.stok + jumlah;
+  // Harga modal mengikuti harga kulakan terbaru (kolom 3 = harga_belanja, kolom 5 = stok)
+  sheet("Barang").getRange(b.row, 3).setValue(hargaBeli);
+  sheet("Barang").getRange(b.row, 5).setValue(stokBaru);
+  catatPengeluaran(user, "kulakan", "Kulakan: " + b.nama + " ×" + jumlah, jumlah * hargaBeli);
+  return { ok: true, stok: stokBaru, harga_belanja: hargaBeli };
+}
+function doPengeluaranAdd(user, p) {
+  var deny = needBos(user); if (deny) return deny;
+  var ket = String(p.keterangan || "").trim();
+  var jumlah = Number(p.jumlah);
+  if (!ket) return { ok: false, error: "Keterangan pengeluaran wajib diisi." };
+  if (isNaN(jumlah) || jumlah <= 0) return { ok: false, error: "Nominal pengeluaran harus angka lebih dari nol." };
+  catatPengeluaran(user, "manual", ket, jumlah);
+  return { ok: true };
+}
+function doPengeluaranList(user) {
+  var deny = needBos(user); if (deny) return deny;
+  var r = rows("Pengeluaran");
+  var list = [];
+  for (var i = 0; i < r.length; i++) {
+    if (!r[i][0]) continue;
+    list.push({
+      id: String(r[i][0]),
+      waktu: r[i][1] ? Utilities.formatDate(new Date(r[i][1]), "Asia/Jakarta", "dd/MM/yyyy HH:mm") : "",
+      jenis: String(r[i][2]),
+      keterangan: String(r[i][3]),
+      jumlah: Number(r[i][4]) || 0,
+      oleh: String(r[i][5] || "")
+    });
+  }
+  list.reverse(); // terbaru di atas
+  return { ok: true, pengeluaran: list };
+}
+function doPengeluaranHapus(user, p) {
+  var deny = needBos(user); if (deny) return deny;
+  var s = sheet("Pengeluaran");
+  var v = s.getDataRange().getValues();
+  for (var i = 1; i < v.length; i++) {
+    if (String(v[i][0]) === String(p.id || "")) {
+      if (String(v[i][2]) !== "manual") {
+        return { ok: false, error: "Catatan kulakan tidak bisa dihapus — terhubung ke stok." };
+      }
+      s.deleteRow(i + 1);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: "Catatan pengeluaran tidak ditemukan." };
+}
+
 /* ---------------- Laporan (khusus Bos) ---------------- */
 function doLaporan(user) {
   var deny = needBos(user); if (deny) return deny;
@@ -589,5 +664,30 @@ function doLaporan(user) {
       persen_mati: denom > 0 ? (g2.mati / denom) * 100 : 0
     });
   }
-  return { ok: true, items: items, total_untung: totalUntung };
+  return { ok: true, items: items, total_untung: totalUntung, keuangan: hitungKeuangan(items, totalUntung) };
+}
+// Ringkasan keuangan menyeluruh (semua waktu, khusus Bos):
+// kas = omset − semua pengeluaran; stok tersisa dihitung sebagai aset.
+function hitungKeuangan(items, totalUntung) {
+  var omset = 0;
+  for (var i = 0; i < items.length; i++) omset += items[i].omset;
+  var kulakan = 0, manual = 0;
+  var pr = rows("Pengeluaran");
+  for (var k = 0; k < pr.length; k++) {
+    if (!pr[k][0]) continue;
+    if (String(pr[k][2]) === "kulakan") kulakan += Number(pr[k][4]) || 0;
+    else if (String(pr[k][2]) === "manual") manual += Number(pr[k][4]) || 0;
+  }
+  var nilaiStok = 0;
+  var br = barangRows();
+  for (var m = 0; m < br.length; m++) nilaiStok += br[m].stok * br[m].harga_belanja;
+  return {
+    omset: omset,
+    pengeluaran_kulakan: kulakan,
+    pengeluaran_manual: manual,
+    total_pengeluaran: kulakan + manual,
+    sisa_kas: omset - kulakan - manual,
+    nilai_stok: nilaiStok,
+    laba_penjualan: totalUntung
+  };
 }

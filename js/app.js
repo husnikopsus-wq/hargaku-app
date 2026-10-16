@@ -169,7 +169,14 @@ function applyOptimistic(action, params) {
       b.harga_jual = Number(params.harga_jual) || 0;
       b.stok = Number(params.stok) || 0;
     }
+  } else if (action === "stok_masuk") {
+    const b = BARANG.find((x) => x.id === params.barang_id);
+    if (b) {
+      b.stok = (Number(b.stok) || 0) + (Number(params.jumlah) || 0);
+      b.harga_belanja = Number(params.harga_beli) || 0;
+    }
   }
+  // pengeluaran_add tidak mengubah cache barang — cukup masuk antrean
   setCache(BARANG.slice());
 }
 function queueMutation(action, params, msg) {
@@ -853,6 +860,7 @@ function renderBos(hash, ses) {
   if (hash === "#/bos/admin") return bosAdmin(ses);
   if (hash === "#/bos/laporan") return bosLaporan(ses);
   if (hash === "#/bos/pelanggan") return bosPelanggan(ses);
+  if (hash === "#/bos/stok-masuk") return bosStokMasuk(ses);
   if (hash === "#/riwayat") return renderRiwayat(ses);
   if (hash === "#/pengaturan") return renderPengaturan(ses);
   location.hash = "#/bos";
@@ -917,7 +925,10 @@ function bosBarang(ses) {
     <div class="content">
       <input class="search-input" placeholder="🔍 Cari barang..." value="${esc(barangSearch)}"
         oninput="barangSearch=this.value;barangShowAll=false;refreshBarangList()">
-      <button class="btn" onclick="location.hash='#/bos/barang-form'">＋ Tambah Barang</button>
+      <div class="btn-row">
+        <button class="btn" onclick="location.hash='#/bos/barang-form'">＋ Tambah Barang</button>
+        <button class="btn secondary" onclick="location.hash='#/bos/stok-masuk'">📥 Stok Masuk</button>
+      </div>
       <div id="barang-list">${barangListHTML()}</div>
     </div>
     ${bottomNav(BOS_NAV, "#/bos/barang")}
@@ -1026,6 +1037,83 @@ async function simpanBarang(id) {
   location.hash = "#/bos/barang";
 }
 
+/* ---------- Stok Masuk / kulakan (Bos) ---------- */
+let stokMasukId = null;
+function bosStokMasuk(ses) {
+  const p = BARANG.find((x) => x.id === stokMasukId) || null;
+  setHTML(`
+    ${headerHTML("Stok Masuk (Kulakan)", "Stok bertambah & otomatis tercatat sebagai pengeluaran")}
+    <div class="content">
+      <div class="card">
+        <form onsubmit="simpanStokMasuk();return false">
+        <div class="field">
+          <label>Pilih barang / ikan</label>
+          <select id="sm-product" onchange="stokMasukId=this.value;bosStokMasuk(getSes())">
+            <option value="">— pilih barang —</option>
+            ${BARANG.map((x) => `<option value="${x.id}" ${x.id === stokMasukId ? "selected" : ""}>${esc(x.nama)} (stok ${num(x.stok)})</option>`).join("")}
+          </select>
+          ${BARANG.length === 0 ? `<div class="hint">Belum ada barang. Tambahkan dulu lewat menu Barang.</div>` : ""}
+        </div>
+        ${p ? `
+          <div class="field">
+            <label>Jumlah masuk</label>
+            <input id="sm-qty" type="number" min="1" inputmode="numeric" value="1" oninput="updateStokMasukTotal()">
+          </div>
+          <div class="field">
+            <label>Harga beli per unit</label>
+            <input id="sm-price" type="number" min="0" inputmode="numeric" value="${Number(p.harga_belanja) || 0}" oninput="updateStokMasukTotal()">
+            <div class="hint">Modal barang akan mengikuti harga kulakan terbaru ini.</div>
+          </div>
+          <div class="card" style="background:var(--card2);margin-bottom:14px">
+            <div class="row-between">
+              <span class="muted">Total bayar</span>
+              <b id="sm-total" style="font-size:1.1rem">${rp(Number(p.harga_belanja) || 0)}</b>
+            </div>
+          </div>
+          <button class="btn" type="submit">📥 Simpan Stok Masuk</button>
+        ` : ""}
+        </form>
+      </div>
+      <button class="btn secondary" onclick="location.hash='#/bos/barang'">← Kembali</button>
+    </div>
+    ${bottomNav(BOS_NAV, "#/bos/barang")}
+  `);
+}
+function updateStokMasukTotal() {
+  const qty = Number(document.getElementById("sm-qty").value) || 0;
+  const price = Number(document.getElementById("sm-price").value) || 0;
+  const el = document.getElementById("sm-total");
+  if (el) el.textContent = rp(qty * price);
+}
+async function simpanStokMasuk() {
+  const p = BARANG.find((x) => x.id === stokMasukId);
+  if (!p) { toast("Pilih barang dulu.", true); return; }
+  const jumlah = Number(document.getElementById("sm-qty").value);
+  const hargaBeli = Number(document.getElementById("sm-price").value);
+  if (!jumlah || jumlah <= 0) { toast("Jumlah masuk tidak valid.", true); return; }
+  if (isNaN(hargaBeli) || hargaBeli < 0) { toast("Harga beli tidak valid.", true); return; }
+  const params = { barang_id: p.id, jumlah, harga_beli: hargaBeli };
+  if (navigator.onLine) {
+    try {
+      const j = await api("stok_masuk", params);
+      const b = BARANG.find((x) => x.id === p.id);
+      if (b) { b.stok = j.stok; b.harga_belanja = j.harga_belanja; setCache(BARANG.slice()); }
+      toast("Stok " + p.nama + " sekarang " + num(j.stok) + ".");
+      stokMasukId = null;
+      lastRefresh = 0;
+      refreshBarang(true);
+      location.hash = "#/bos/barang";
+      return;
+    } catch (e) {
+      if (!isNetError(e)) { toast(e.message, true); return; }
+      // koneksi putus — lanjut ke antrean
+    }
+  }
+  queueMutation("stok_masuk", params, "Stok masuk disimpan di antrean — terkirim saat online.");
+  stokMasukId = null;
+  location.hash = "#/bos/barang";
+}
+
 /* ---------- Kelola Admin (Bos) ---------- */
 async function bosAdmin(ses) {
   setHTML(`
@@ -1124,27 +1212,52 @@ async function bosLaporan(ses) {
     ${bottomNav(BOS_NAV, "#/bos/laporan")}
   `);
   let j;
+  let laporanError = "";
   try {
     j = await api("laporan");
   } catch (e) {
-    screen().querySelector(".content").innerHTML =
-      emptyState("📡", isNetError(e) ? "Butuh koneksi untuk memuat laporan." : e.message);
-    return;
+    // Laporan gagal (offline) — kartu ringkasan tampil nol, form pengeluaran tetap ada
+    laporanError = isNetError(e) ? "Ringkasan laporan butuh koneksi internet." : e.message;
+    j = { items: [], total_untung: 0 };
   }
   const items = j.items || [];
-  if (items.length === 0) {
-    screen().querySelector(".content").innerHTML = emptyState("📊", "Belum ada transaksi sama sekali.");
-    return;
-  }
   const totalOmset = items.reduce((a, x) => a + x.omset, 0);
   const totalKerugian = items.reduce((a, x) => a + x.kerugian, 0);
+  const k = j.keuangan || {}; // backend lama belum punya field ini — tampilkan nol
   screen().querySelector(".content").innerHTML = `
     <button class="btn secondary" onclick="location.hash='#/bos/pelanggan'">👥 Database Pelanggan</button>
+    ${laporanError ? `<div class="card"><div class="muted">📡 ${esc(laporanError)}</div></div>` : `
     <div class="stats">
       <div class="stat"><div class="label">Omset</div><div class="value teal">${rp(totalOmset)}</div></div>
       <div class="stat"><div class="label">Kerugian</div><div class="value amber">${rp(totalKerugian)}</div></div>
       <div class="stat" style="grid-column:1/-1"><div class="label">Total Untung</div><div class="value green">${rp(j.total_untung || 0)}</div></div>
+    </div>`}
+    <div class="card">
+      <h3>💰 Ringkasan Keuangan</h3>
+      <div class="row-between"><span>Omset <span class="muted">— total penjualan</span></span><b>${rp(k.omset !== undefined ? k.omset : totalOmset)}</b></div>
+      <div class="row-between"><span>Pengeluaran kulakan <span class="muted">— belanja stok ikan</span></span><b>${rp(k.pengeluaran_kulakan || 0)}</b></div>
+      <div class="row-between"><span>Pengeluaran lainnya <span class="muted">— biaya operasional</span></span><b>${rp(k.pengeluaran_manual || 0)}</b></div>
+      <hr class="sep">
+      <div class="row-between"><span><b>Sisa kas</b> <span class="muted">— omset dikurangi semua pengeluaran</span></span><b>${rp(k.sisa_kas || 0)}</b></div>
+      <div class="row-between"><span>Nilai stok tersisa <span class="muted">— ikan yang belum laku, dihitung sebagai aset</span></span><b>${rp(k.nilai_stok || 0)}</b></div>
+      <div class="row-between"><span>Laba penjualan <span class="muted">— omset dikurangi modal ikan terjual &amp; kerugian</span></span><b>${rp(k.laba_penjualan !== undefined ? k.laba_penjualan : (j.total_untung || 0))}</b></div>
     </div>
+    <div class="card">
+      <h3>💸 Pengeluaran</h3>
+      <form onsubmit="simpanPengeluaran();return false">
+      <div class="field">
+        <label>Keterangan</label>
+        <input id="x-ket" placeholder="cth: Es balok, solar, pakan" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>Nominal</label>
+        <input id="x-jumlah" type="number" min="1" inputmode="numeric" placeholder="cth: 50000">
+      </div>
+      <button class="btn secondary" type="submit">Simpan Pengeluaran</button>
+      </form>
+      <div id="pengeluaran-list" style="margin-top:12px"><div class="muted">Memuat...</div></div>
+    </div>
+    ${laporanError ? "" : items.length === 0 ? `<div class="card"><div class="muted">Belum ada transaksi sama sekali.</div></div>` : `
     <div class="card">
       <h3>Per produk</h3>
       <div class="table-wrap">
@@ -1173,8 +1286,68 @@ async function bosLaporan(ses) {
         </table>
       </div>
       <div class="hint" style="margin-top:8px">Profit = Omset − modal barang terjual − kerugian kematian. Sisa stok bukan kerugian.</div>
-    </div>
+    </div>`}
   `;
+  muatPengeluaran();
+}
+function pengeluaranListHTML(list) {
+  if (!list.length) return `<div class="muted">Belum ada pengeluaran tercatat.</div>`;
+  return `<div class="list">${list.map((x) => `
+    <div class="item">
+      <div class="info">
+        <div class="name">${esc(x.keterangan)} <span class="badge ${x.jenis === "kulakan" ? "warn" : ""}">${x.jenis === "kulakan" ? "Kulakan" : "Manual"}</span></div>
+        <div class="meta">${esc(x.waktu)}${x.oleh ? " • " + esc(x.oleh) : ""}</div>
+      </div>
+      <div class="right">
+        <div class="price">${rp(x.jumlah)}</div>
+        ${x.jenis === "manual" ? `<button class="btn small danger" style="margin-top:6px" onclick="hapusPengeluaran('${x.id}')">🗑️</button>` : ""}
+      </div>
+    </div>`).join("")}
+  </div>`;
+}
+async function muatPengeluaran() {
+  const el = document.getElementById("pengeluaran-list");
+  if (!el) return;
+  if (!navigator.onLine) {
+    el.innerHTML = `<div class="muted">Daftar pengeluaran butuh koneksi internet.</div>`;
+    return;
+  }
+  try {
+    const j = await api("pengeluaran_list");
+    el.innerHTML = pengeluaranListHTML(j.pengeluaran || []);
+  } catch (e) {
+    el.innerHTML = `<div class="muted">${esc(isNetError(e) ? "Daftar pengeluaran butuh koneksi internet." : e.message)}</div>`;
+  }
+}
+async function simpanPengeluaran() {
+  const ket = document.getElementById("x-ket").value.trim();
+  const jumlah = Number(document.getElementById("x-jumlah").value);
+  if (!ket) { toast("Keterangan wajib diisi.", true); return; }
+  if (isNaN(jumlah) || jumlah <= 0) { toast("Nominal pengeluaran harus angka lebih dari nol.", true); return; }
+  const params = { keterangan: ket, jumlah };
+  if (navigator.onLine) {
+    try {
+      await api("pengeluaran_add", params);
+      toast("Pengeluaran tercatat.");
+      bosLaporan(getSes());
+      return;
+    } catch (e) {
+      if (!isNetError(e)) { toast(e.message, true); return; }
+      // koneksi putus — lanjut ke antrean
+    }
+  }
+  queueMutation("pengeluaran_add", params, "Pengeluaran disimpan di antrean — terkirim saat online.");
+  bosLaporan(getSes());
+}
+async function hapusPengeluaran(id) {
+  if (!confirm("Hapus catatan pengeluaran ini? Stok tidak berubah.")) return;
+  try {
+    await api("pengeluaran_hapus", { id });
+    toast("Catatan pengeluaran dihapus.");
+    muatPengeluaran();
+  } catch (e) {
+    toast(isNetError(e) ? "Butuh koneksi untuk menghapus." : e.message, true);
+  }
 }
 
 /* ---------- Database Pelanggan (Bos) ---------- */
