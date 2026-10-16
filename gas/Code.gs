@@ -582,7 +582,7 @@ function doPelangganList(user) {
 }
 function doPelangganHapus(user, p) {
   var deny = needBos(user); if (deny) return deny;
-  var nama = String(p.nama || "");
+  var nama = String(p.target_nama || "");
   var noHp = String(p.no_hp || "");
   var s = sheet("Pelanggan");
   var v = s.getDataRange().getValues();

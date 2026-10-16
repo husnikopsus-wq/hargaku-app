@@ -1527,7 +1527,7 @@ async function hapusPelanggan(i) {
   if (!navigator.onLine) { toast("Hapus pelanggan butuh koneksi internet.", true); return; }
   if (!confirm('Hapus pelanggan "' + (c.nama || c.no_hp) + '" dari database?')) return;
   try {
-    await api("pelanggan_hapus", { nama: c.nama, no_hp: c.no_hp });
+    await api("pelanggan_hapus", { target_nama: c.nama, no_hp: c.no_hp });
     toast("Pelanggan " + (c.nama || c.no_hp) + " dihapus.");
     bosPelanggan(getSes());
   } catch (e) {
