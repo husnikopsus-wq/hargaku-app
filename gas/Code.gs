@@ -173,7 +173,7 @@ function handle(p) {
       case "admin_list":      return out(doAdminList(user));
       case "user_pin_change": return withLock(function () { return doPinChange(user, p); });
       case "riwayat":         return out(doRiwayat(user));
-      case "laporan":         return out(doLaporan(user));
+      case "laporan":         return out(doLaporan(user, p));
       case "pelanggan_list":  return out(doPelangganList(user));
       case "transaksi_edit":  return withLock(function () { return doTransaksiEdit(user, p); });
       case "transaksi_hapus": return withLock(function () { return doTransaksiHapus(user, p); });
@@ -660,13 +660,37 @@ function doPengeluaranHapus(user, p) {
 }
 
 /* ---------------- Laporan (khusus Bos) ---------------- */
-function doLaporan(user) {
+// Predikat tanggal per periode, semua berbasis Asia/Jakarta — tanpa matematika
+// timezone manual: bandingkan string "yyyy/MM/dd" hasil formatDate.
+function filterPeriode(periode) {
+  var tz = "Asia/Jakarta";
+  if (periode === "hari") {
+    var today = Utilities.formatDate(new Date(), tz, "yyyy/MM/dd");
+    return function (w) { return Utilities.formatDate(new Date(w), tz, "yyyy/MM/dd") === today; };
+  }
+  if (periode === "minggu") {
+    var set = {};
+    for (var n = 0; n < 7; n++) {
+      set[Utilities.formatDate(new Date(Date.now() - n * 86400000), tz, "yyyy/MM/dd")] = true;
+    }
+    return function (w) { return !!set[Utilities.formatDate(new Date(w), tz, "yyyy/MM/dd")]; };
+  }
+  if (periode === "bulan") {
+    var ym = Utilities.formatDate(new Date(), tz, "yyyy/MM");
+    return function (w) { return Utilities.formatDate(new Date(w), tz, "yyyy/MM") === ym; };
+  }
+  return function () { return true; }; // "semua" — tanpa filter (perilaku lama)
+}
+function doLaporan(user, p) {
   var deny = needBos(user); if (deny) return deny;
+  var periode = String((p && p.periode) || "semua");
+  var cocok = filterPeriode(periode);
   var r = rows("Transaksi");
   var agg = {};
   var order = [];
   for (var i = 0; i < r.length; i++) {
     if (!r[i][0]) continue;
+    if (!cocok(r[i][1])) continue; // saring periode berdasarkan kolom waktu
     var bid = String(r[i][3]);
     if (!agg[bid]) {
       agg[bid] = { nama: String(r[i][4]), terjual: 0, mati: 0, omset: 0, kerugian: 0, modal_terjual: 0 };
@@ -703,17 +727,18 @@ function doLaporan(user) {
       persen_mati: denom > 0 ? (g2.mati / denom) * 100 : 0
     });
   }
-  return { ok: true, items: items, total_untung: totalUntung, keuangan: hitungKeuangan(items, totalUntung) };
+  return { ok: true, periode: periode, items: items, total_untung: totalUntung, keuangan: hitungKeuangan(items, totalUntung, cocok) };
 }
-// Ringkasan keuangan menyeluruh (semua waktu, khusus Bos):
-// kas = omset − semua pengeluaran; stok tersisa dihitung sebagai aset.
-function hitungKeuangan(items, totalUntung) {
+// Ringkasan keuangan (khusus Bos): kas = omset − pengeluaran per periode yang sama;
+// nilai_stok SELALU snapshot saat ini (aset, bukan angka periode).
+function hitungKeuangan(items, totalUntung, cocok) {
   var omset = 0;
   for (var i = 0; i < items.length; i++) omset += items[i].omset;
   var kulakan = 0, manual = 0;
   var pr = rows("Pengeluaran");
   for (var k = 0; k < pr.length; k++) {
     if (!pr[k][0]) continue;
+    if (cocok && !cocok(pr[k][1])) continue; // pengeluaran ikut disaring periode
     if (String(pr[k][2]) === "kulakan") kulakan += Number(pr[k][4]) || 0;
     else if (String(pr[k][2]) === "manual") manual += Number(pr[k][4]) || 0;
   }

@@ -1300,10 +1300,23 @@ async function gantiPinUser(nama) {
 }
 
 /* ---------- Laporan (Bos) ---------- */
+/* ---------- Laporan (Bos) ---------- */
+const PERIODE_LABEL = { hari: "Hari Ini", minggu: "7 Hari", bulan: "Bulan Ini", semua: "Semua" };
+let laporanPeriode = "hari"; // pilihan tersimpan antar render
+function periodeSelectorHTML() {
+  return `<div class="btn-row" style="margin-bottom:10px">${Object.keys(PERIODE_LABEL).map((v) =>
+    `<button class="btn ${laporanPeriode === v ? "" : "secondary"}" onclick="pilihPeriode('${v}')">${PERIODE_LABEL[v]}</button>`
+  ).join("")}</div>`;
+}
+function pilihPeriode(v) {
+  laporanPeriode = v;
+  bosLaporan(getSes());
+}
 async function bosLaporan(ses) {
   setHTML(`
     ${headerHTML("Laporan", "Omset, kematian, kerugian, dan untung per produk")}
     <div class="content">
+      ${periodeSelectorHTML()}
       <button class="btn secondary" onclick="location.hash='#/bos/pelanggan'">👥 Database Pelanggan</button>
       <div class="empty-state"><div class="big">⏳</div>Memuat laporan...</div>
     </div>
@@ -1312,7 +1325,7 @@ async function bosLaporan(ses) {
   let j;
   let laporanError = "";
   try {
-    j = await api("laporan");
+    j = await api("laporan", { periode: laporanPeriode });
   } catch (e) {
     // Laporan gagal (offline) — kartu ringkasan tampil nol, form pengeluaran tetap ada
     laporanError = isNetError(e) ? "Ringkasan laporan butuh koneksi internet." : e.message;
@@ -1322,8 +1335,12 @@ async function bosLaporan(ses) {
   const totalOmset = items.reduce((a, x) => a + x.omset, 0);
   const totalKerugian = items.reduce((a, x) => a + x.kerugian, 0);
   const k = j.keuangan || {}; // backend lama belum punya field ini — tampilkan nol
+  // Backend lama mengabaikan param periode — pakai label pilihan sendiri
+  const periodeLabel = PERIODE_LABEL[j.periode || laporanPeriode] || laporanPeriode;
   screen().querySelector(".content").innerHTML = `
+    ${periodeSelectorHTML()}
     <button class="btn secondary" onclick="location.hash='#/bos/pelanggan'">👥 Database Pelanggan</button>
+    <div class="muted" style="text-align:center;margin-bottom:8px">Periode: ${esc(periodeLabel)}</div>
     ${laporanError ? `<div class="card"><div class="muted">📡 ${esc(laporanError)}</div></div>` : `
     <div class="stats">
       <div class="stat"><div class="label">Omset</div><div class="value teal">${rp(totalOmset)}</div></div>
@@ -1337,7 +1354,7 @@ async function bosLaporan(ses) {
       <div class="row-between"><span>Pengeluaran lainnya <span class="muted">— biaya operasional</span></span><b>${rp(k.pengeluaran_manual || 0)}</b></div>
       <hr class="sep">
       <div class="row-between"><span><b>Sisa kas</b> <span class="muted">— omset dikurangi semua pengeluaran</span></span><b>${rp(k.sisa_kas || 0)}</b></div>
-      <div class="row-between"><span>Nilai stok tersisa <span class="muted">— ikan yang belum laku, dihitung sebagai aset</span></span><b>${rp(k.nilai_stok || 0)}</b></div>
+      <div class="row-between"><span>Nilai stok saat ini <span class="muted">— ikan yang belum laku, dihitung sebagai aset (snapshot, bukan per periode)</span></span><b>${rp(k.nilai_stok || 0)}</b></div>
       <div class="row-between"><span>Laba penjualan <span class="muted">— omset dikurangi modal ikan terjual &amp; kerugian</span></span><b>${rp(k.laba_penjualan !== undefined ? k.laba_penjualan : (j.total_untung || 0))}</b></div>
     </div>
     <div class="card">
@@ -1353,6 +1370,7 @@ async function bosLaporan(ses) {
       </div>
       <button class="btn secondary" type="submit">Simpan Pengeluaran</button>
       </form>
+      <div class="muted" style="margin-top:10px;font-size:.78rem">Daftar menampilkan semua pengeluaran (tidak ikut saringan periode).</div>
       <div id="pengeluaran-list" style="margin-top:12px"><div class="muted">Memuat...</div></div>
     </div>
     ${laporanError ? "" : items.length === 0 ? `<div class="card"><div class="muted">Belum ada transaksi sama sekali.</div></div>` : `
