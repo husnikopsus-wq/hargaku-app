@@ -1,7 +1,7 @@
 @echo off
-title HargaKu - Server Lokal
+title JualanKu - Server Lokal
 echo ============================================
-echo   HargaKu - Server Lokal
+echo   JualanKu - Server Lokal
 echo   Buka http://localhost:8931 di browser
 echo   Biarkan jendela ini tetap terbuka
 echo ============================================

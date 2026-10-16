@@ -1,5 +1,5 @@
 /* =========================================================
-   HargaKu Online — Frontend
+   JualanKu — Frontend
    Terhubung ke Google Sheet milik Bos lewat Apps Script.
    Role: BOS (lihat modal & untung) | ADMIN (jual & catat kematian)
    Toleran offline: daftar barang dicache, transaksi antre di outbox.
@@ -677,7 +677,7 @@ function renderMati(ses) {
   const available = BARANG.filter((p) => Number(p.stok) > 0);
   const p = available.find((x) => x.id === deathProductId) || null;
   setHTML(`
-    ${headerHTML("Catat Kematian", "Unggas yang mati mengurangi stok")}
+    ${headerHTML("Catat Kematian", "Ikan yang mati mengurangi stok")}
     <div class="content">
       <div class="card">
         <form onsubmit="submitMati();return false">
@@ -1063,7 +1063,7 @@ function bosBarangForm(ses, hash) {
         </div>
         <div class="field">
           <label>Nama barang</label>
-          <input id="f-nama" value="${esc(p ? p.nama : "")}" placeholder="cth: Ayam Broiler">
+          <input id="f-nama" value="${esc(p ? p.nama : "")}" placeholder="cth: Ikan Bandeng">
         </div>
         <div class="field">
           <label>Harga belanja (modal) — rahasia, hanya Bos</label>

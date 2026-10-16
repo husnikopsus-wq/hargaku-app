@@ -1,5 +1,5 @@
 /* =========================================================
-   HargaKu Online — Printer Bluetooth thermal (ESC/POS 58mm)
+   JualanKu — Printer Bluetooth thermal (ESC/POS 58mm)
    Dimuat setelah app.js. Semua fungsi aman dipanggil walau
    browser tidak mendukung Web Bluetooth (misal bukan Chrome
    Android) — pencetakan jatuh ke jendela cetak biasa.

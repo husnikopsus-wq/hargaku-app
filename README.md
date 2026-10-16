@@ -1,6 +1,6 @@
-# HargaKu Online 🐔
+# JualanKu — Teras Laut Cirebon 🐠
 
-Aplikasi mobile (PWA) untuk mencatat **penjualan** dan **kematian ternak/unggas**, dengan pembagian peran:
+Aplikasi mobile (PWA) untuk mencatat **penjualan** dan **kematian ikan**, dengan pembagian peran:
 
 | Peran | Yang bisa dilakukan |
 |---|---|
@@ -11,7 +11,7 @@ Aplikasi mobile (PWA) untuk mencatat **penjualan** dan **kematian ternak/unggas*
 
 - **Sekarang online**: semua data tersimpan di **Google Sheet milik Bos**, bukan di HP masing-masing.
 - **Semua HP karyawan sinkron** — jualan yang diinput Admin langsung terlihat di laporan Bos.
-- Ada fitur baru **pencatatan kematian** unggas beserta perhitungan kerugiannya.
+- Ada fitur baru **pencatatan kematian** ikan beserta perhitungan kerugiannya.
 - Kalau internet putus, catatan jual/mati **antre dulu di HP** dan terkirim otomatis begitu online lagi.
 
 ---
@@ -24,7 +24,7 @@ Kerjakan langkah ini satu kali di komputer/HP Bos. Tidak perlu bisa programming.
 
 1. Buka **https://sheets.google.com** dan masuk dengan akun Google Anda.
 2. Klik **+ Kosong** untuk membuat spreadsheet baru.
-3. Klik judul di kiri atas, ganti namanya menjadi **"HargaKu"**.
+3. Klik judul di kiri atas, ganti namanya menjadi **"JualanKu"** (nama bebas, tidak memengaruhi aplikasi).
 
 ### b. Tempel kode Apps Script
 
@@ -50,7 +50,7 @@ Kerjakan langkah ini satu kali di komputer/HP Bos. Tidak perlu bisa programming.
 1. Di editor Apps Script, klik tombol biru **Deploy → New deployment**.
 2. Klik ikon **⚙️ roda gigi** di samping "Select type" → pilih **Web app**.
 3. Isi:
-   - **Description**: bebas, misal `HargaKu v1`
+   - **Description**: bebas, misal `JualanKu v1`
    - **Execute as**: **Me**
    - **Who has access**: **Anyone**
 4. Klik **Deploy**. Izinkan lagi bila diminta.
@@ -70,13 +70,13 @@ Bagikan string ini ke HP karyawan (misal lewat WhatsApp). Di HP masing-masing, s
 
 ### f. Melihat data langsung di Google Sheet
 
-Semua data bisa dipantau langsung dari spreadsheet "HargaKu":
+Semua data bisa dipantau langsung dari spreadsheet Anda:
 
 | Tab | Isi |
 |---|---|
 | **Config** | APP_KEY aplikasi |
 | **Users** | Daftar pengguna (nama, PIN ter-hash, peran) |
-| **Barang** | Daftar barang/unggas: harga belanja, harga jual, stok |
+| **Barang** | Daftar barang/ikan: harga belanja, harga jual, stok |
 | **Transaksi** | Semua catatan jual & kematian, lengkap dengan waktu dan siapa yang menginput |
 
 ---
@@ -101,7 +101,7 @@ Unggah seluruh isi folder `harga-app` ke hosting statis gratis (Netlify, Vercel,
 3. Di HP, buka browser → ketik `http://<IP-komputer>:8931`
    (IP komputer bisa dilihat dengan perintah `ipconfig`, contoh: `192.168.1.10:8931`).
 
-Di kedua opsi, browser HP akan menawarkan **"Tambahkan ke layar utama"** — terima, dan HargaKu jadi aplikasi standalone seperti aplikasi native.
+Di kedua opsi, browser HP akan menawarkan **"Tambahkan ke layar utama"** — terima, dan JualanKu jadi aplikasi standalone seperti aplikasi native.
 
 ---
 
@@ -116,7 +116,7 @@ Di kedua opsi, browser HP akan menawarkan **"Tambahkan ke layar utama"** — ter
 
 ### 👑 Bos
 
-1. **Barang** → tambah barang/unggas: nama, harga belanja (rahasia), harga jual, stok.
+1. **Barang** → tambah barang/ikan: nama, harga belanja (rahasia), harga jual, stok.
 2. **Kelola Admin** → tambah admin satu per satu (nama + PIN) dan ganti PIN pengguna.
 3. **Jual / Kematian** → Bos juga bisa mencatat penjualan dan kematian.
 4. **Beranda** → ringkasan Omset, Kerugian (kematian), dan Total Untung.

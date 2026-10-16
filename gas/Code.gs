@@ -1,10 +1,10 @@
 /* =========================================================
-   HargaKu Online — Backend Google Apps Script
+   JualanKu (Teras Laut Cirebon) — Backend Google Apps Script
    =========================================================
    CARA PAKAI (sekali saja, oleh Bos):
 
    1. Buka https://sheets.google.com → buat spreadsheet kosong
-      → beri nama "HargaKu".
+      → beri nama "JualanKu" (atau nama bebas lain).
    2. Menu Ekstensi (Extensions) → Apps Script.
    3. Hapus semua isi editor, tempel SELURUH file ini, klik Simpan.
    4. Di atas editor, pilih fungsi "setup" lalu klik Run/Jalankan.
@@ -14,7 +14,7 @@
       yang dibuat otomatis (juga tersimpan di tab "Config").
    6. Klik Deploy → New deployment → ikon roda gigi → pilih
       "Web app":
-        - Description      : bebas, misal "HargaKu v1"
+        - Description      : bebas, misal "JualanKu v1"
         - Execute as       : Me
         - Who has access   : Anyone
       Klik Deploy, lalu SALIN "Web app URL" (berakhiran /exec).
