@@ -181,7 +181,7 @@ function route() {
   if (ses.peran === "bos") renderBos(hash, ses);
   else renderAdmin(hash, ses);
 }
-window.addEventListener("hashchange", route);
+window.addEventListener("hashchange", () => { lastNotaTx = null; route(); });
 
 /* ---------------- Template bantu ---------------- */
 const screen = () => document.getElementById("screen");
@@ -338,6 +338,7 @@ async function doLogin() {
    ========================================================= */
 let sellProductId = null;
 let deathProductId = null;
+let lastNotaTx = null; // transaksi terakhir berhasil — untuk tombol Cetak Nota
 
 function renderJual(ses) {
   const available = BARANG.filter((p) => Number(p.stok) > 0);
@@ -345,6 +346,16 @@ function renderJual(ses) {
   setHTML(`
     ${headerHTML("Input Penjualan", "Stok berkurang otomatis setelah tersimpan")}
     <div class="content">
+      ${lastNotaTx ? `
+      <div class="card" style="border:1px solid var(--accent)">
+        <div class="row-between">
+          <div>
+            <b>✅ Penjualan tersimpan</b><br>
+            <span class="muted">${esc(lastNotaTx.nama_barang)} × ${num(lastNotaTx.jumlah)} — ${rp(lastNotaTx.jumlah * lastNotaTx.harga_jual)}</span>
+          </div>
+          <button class="btn" style="width:auto" onclick="cetakNotaTerakhir()">🖨️ Cetak Nota</button>
+        </div>
+      </div>` : ""}
       <div class="card">
         <form onsubmit="submitJual();return false">
         <div class="field">
@@ -405,6 +416,10 @@ async function submitJual() {
       const b = BARANG.find((x) => x.id === p.id);
       if (b) b.stok = j.stok;
       setCache(BARANG.slice());
+      lastNotaTx = j.transaksi || {
+        nama_barang: p.nama, jumlah, harga_jual: harga,
+        admin: (getSes() || {}).nama || "", waktu: "",
+      };
       toast("Penjualan " + p.nama + " × " + jumlah + " tersimpan!");
       sellProductId = null;
       route();
@@ -416,6 +431,15 @@ async function submitJual() {
   queueMutation("jual", params, p.id, jumlah);
   sellProductId = null;
   route();
+}
+async function cetakNotaTerakhir() {
+  if (!lastNotaTx) return;
+  try {
+    await printNota(lastNotaTx);
+    toast("Nota dikirim ke printer.");
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function renderMati(ses) {
@@ -493,6 +517,7 @@ async function renderRiwayat(ses) {
     return;
   }
   const isBos = ses.peran === "bos";
+  RIWAYAT_LAST = list;
   screen().querySelector(".content").innerHTML = list.length === 0
     ? emptyState("🧾", "Belum ada transaksi.")
     : `<div class="list">${list.map((t) => `
@@ -510,11 +535,29 @@ async function renderRiwayat(ses) {
           </div>
           <div class="right">
             ${t.jenis === "jual"
-              ? `<div class="price">${rp(t.jumlah * t.harga_jual)}</div><div class="meta">${rp(t.harga_jual)}/unit</div>`
+              ? `<div class="price">${rp(t.jumlah * t.harga_jual)}</div><div class="meta">${rp(t.harga_jual)}/unit</div>
+                 <button class="btn small secondary" style="margin-top:6px" onclick="cetakNotaRiwayat('${t.id}')">🖨️</button>`
               : `<div class="meta">—</div>`}
           </div>
         </div>`).join("")}
       </div>`;
+}
+let RIWAYAT_LAST = [];
+async function cetakNotaRiwayat(id) {
+  const t = RIWAYAT_LAST.find((x) => x.id === id);
+  if (!t) return;
+  try {
+    await printNota({
+      nama_barang: t.nama_barang,
+      jumlah: t.jumlah,
+      harga_jual: t.harga_jual,
+      admin: t.admin || (getSes() || {}).nama || "",
+      waktu: t.waktu,
+    });
+    toast("Nota dikirim ke printer.");
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 /* =========================================================
@@ -543,6 +586,12 @@ function renderPengaturan(ses) {
           <div class="hint">Ubah hanya jika Bos meminta (misal APP_KEY diganti). Menyimpan akan memeriksa koneksi dulu.</div>
         </div>
         <button class="btn secondary" onclick="ubahKonfigurasi()">Simpan Konfigurasi</button>
+      </div>
+      <div class="card">
+        <h3>🖨️ Printer Bluetooth</h3>
+        <div class="muted" id="printer-status" style="margin-bottom:10px">${printerStatusHTML()}</div>
+        <button class="btn secondary" onclick="hubungkanPrinter()">Hubungkan Printer</button>
+        <div class="hint">Untuk printer thermal kasir 58mm. Membutuhkan Chrome di Android.</div>
       </div>
       ${ses.peran === "bos" ? `
       <div class="card">
@@ -587,6 +636,22 @@ async function ubahKonfigurasi() {
   }
   setCfg(cfg);
   toast("Konfigurasi diperbarui.");
+}
+function printerStatusHTML() {
+  if (typeof printerStatus !== "function") return "Modul printer belum termuat.";
+  const st = printerStatus();
+  if (!st.tersedia) return "Bluetooth tidak tersedia di browser ini.";
+  return st.terhubung ? "Terhubung: " + esc(st.nama) : "Belum terhubung.";
+}
+async function hubungkanPrinter() {
+  try {
+    const st = await printerConnect();
+    toast("Printer terhubung: " + (st.nama || "printer"));
+  } catch (e) {
+    toast(e.message, true);
+  }
+  const el = document.getElementById("printer-status");
+  if (el) el.textContent = printerStatusHTML();
 }
 
 /* =========================================================
