@@ -1312,6 +1312,101 @@ function pilihPeriode(v) {
   laporanPeriode = v;
   bosLaporan(getSes());
 }
+
+/* ---------- Cache laporan per periode + hitung antrean lokal ---------- */
+function simpanCacheLaporan(periode, data) {
+  try { localStorage.setItem("jualanku_laporan_" + periode, JSON.stringify({ data, at: Date.now() })); } catch (e) { /* abaikan */ }
+}
+function bacaCacheLaporan(periode) {
+  try { return JSON.parse(localStorage.getItem("jualanku_laporan_" + periode)); } catch (e) { return null; }
+}
+// Deltas dari antrean offline. ASUMSI: semua catatan antrean terjadi "sekarang",
+// jadi ikut di semua periode (hari/minggu/bulan/semua).
+// Modal (harga_belanja) diambil dari cache BARANG; tak dikenal → dianggap 0.
+function hitungDeltaAntrean() {
+  const d = { omset: 0, laba: 0, kulakan: 0, manual: 0, nilaiStok: 0, n: 0, perProduk: {} };
+  const gabung = (bid, x) => {
+    if (!d.perProduk[bid]) d.perProduk[bid] = { nama: x.nama || bid, terjual: 0, mati: 0, omset: 0, kerugian: 0, modal: 0 };
+    const g = d.perProduk[bid];
+    g.terjual += x.terjual || 0;
+    g.mati += x.mati || 0;
+    g.omset += x.omset || 0;
+    g.kerugian += x.kerugian || 0;
+    g.modal += x.modal || 0;
+    if (x.nama) g.nama = x.nama;
+  };
+  const jualSatu = (bid, jumlah, harga) => {
+    const b = BARANG.find((x) => x.id === bid);
+    const modal = b ? Number(b.harga_belanja) || 0 : 0;
+    const omset = jumlah * harga;
+    d.omset += omset;
+    d.laba += omset - jumlah * modal;
+    d.nilaiStok -= jumlah * modal;
+    gabung(bid, { nama: b ? b.nama : bid, terjual: jumlah, omset, modal: jumlah * modal });
+    d.n++;
+  };
+  getOutbox().forEach((item) => {
+    const p = item.params || {};
+    if (item.action === "jual") {
+      jualSatu(p.barang_id, Number(p.jumlah) || 0, Number(p.harga_jual) || 0);
+    } else if (item.action === "jual_multi") {
+      (p.items || []).forEach((it) => jualSatu(it.barang_id, Number(it.jumlah) || 0, Number(it.harga_jual) || 0));
+    } else if (item.action === "stok_masuk") {
+      const nilai = (Number(p.jumlah) || 0) * (Number(p.harga_beli) || 0);
+      d.kulakan += nilai;
+      d.nilaiStok += nilai;
+      d.n++;
+    } else if (item.action === "pengeluaran_add") {
+      d.manual += Number(p.jumlah) || 0;
+      d.n++;
+    } else if (item.action === "mati") {
+      const b = BARANG.find((x) => x.id === p.barang_id);
+      const modal = b ? Number(b.harga_belanja) || 0 : 0;
+      const rugi = (Number(p.jumlah) || 0) * modal;
+      d.laba -= rugi;
+      d.nilaiStok -= rugi;
+      gabung(p.barang_id, { nama: b ? b.nama : p.barang_id, mati: Number(p.jumlah) || 0, kerugian: rugi });
+      d.n++;
+    }
+  });
+  return d;
+}
+// Tumpuk deltas di atas snapshot cache — tidak mengubah objek cache aslinya.
+function terapkanDeltaLaporan(data) {
+  const d = hitungDeltaAntrean();
+  if (d.n === 0) return { data, deltaN: 0 };
+  const itemsLama = data.items || [];
+  const omsetDasar = itemsLama.reduce((a, x) => a + x.omset, 0);
+  const untungDasar = Number(data.total_untung) || 0;
+  const items = itemsLama.map((x) => Object.assign({}, x));
+  Object.keys(d.perProduk).forEach((bid) => {
+    const dp = d.perProduk[bid];
+    let row = items.find((x) => x.barang_id === bid);
+    if (!row) {
+      row = { barang_id: bid, nama: dp.nama, terjual: 0, mati: 0, omset: 0, kerugian: 0, profit: 0, persen_mati: 0 };
+      items.push(row);
+    }
+    row.terjual += dp.terjual;
+    row.mati += dp.mati;
+    row.omset += dp.omset;
+    row.kerugian += dp.kerugian;
+    row.profit = (Number(row.profit) || 0) + dp.omset - dp.modal - dp.kerugian;
+    const denom = row.terjual + row.mati;
+    row.persen_mati = denom > 0 ? (row.mati / denom) * 100 : 0;
+  });
+  const k = Object.assign({}, data.keuangan || {});
+  k.omset = (k.omset !== undefined ? k.omset : omsetDasar) + d.omset;
+  k.pengeluaran_kulakan = (k.pengeluaran_kulakan || 0) + d.kulakan;
+  k.pengeluaran_manual = (k.pengeluaran_manual || 0) + d.manual;
+  k.total_pengeluaran = k.pengeluaran_kulakan + k.pengeluaran_manual;
+  k.sisa_kas = k.omset - k.total_pengeluaran;
+  k.nilai_stok = (k.nilai_stok || 0) + d.nilaiStok;
+  k.laba_penjualan = (k.laba_penjualan !== undefined ? k.laba_penjualan : untungDasar) + d.laba;
+  return {
+    data: Object.assign({}, data, { items, total_untung: untungDasar + d.laba, keuangan: k }),
+    deltaN: d.n,
+  };
+}
 async function bosLaporan(ses) {
   setHTML(`
     ${headerHTML("Laporan", "Omset, kematian, kerugian, dan untung per produk")}
@@ -1324,12 +1419,21 @@ async function bosLaporan(ses) {
   `);
   let j;
   let laporanError = "";
+  let cacheDipakai = null; // {at, deltaN} bila merender dari snapshot offline
   try {
     j = await api("laporan", { periode: laporanPeriode });
+    simpanCacheLaporan(laporanPeriode, j);
   } catch (e) {
-    // Laporan gagal (offline) — kartu ringkasan tampil nol, form pengeluaran tetap ada
-    laporanError = isNetError(e) ? "Ringkasan laporan butuh koneksi internet." : e.message;
-    j = { items: [], total_untung: 0 };
+    const snap = bacaCacheLaporan(laporanPeriode);
+    if (snap && snap.data) {
+      // Offline/gagal jaringan: pakai snapshot + tumpuk antrean lokal
+      const hasil = terapkanDeltaLaporan(snap.data);
+      j = hasil.data;
+      cacheDipakai = { at: snap.at, deltaN: hasil.deltaN };
+    } else {
+      laporanError = isNetError(e) ? "Laporan butuh koneksi internet pertama kali." : e.message;
+      j = { items: [], total_untung: 0 };
+    }
   }
   const items = j.items || [];
   const totalOmset = items.reduce((a, x) => a + x.omset, 0);
@@ -1341,6 +1445,10 @@ async function bosLaporan(ses) {
     ${periodeSelectorHTML()}
     <button class="btn secondary" onclick="location.hash='#/bos/pelanggan'">👥 Database Pelanggan</button>
     <div class="muted" style="text-align:center;margin-bottom:8px">Periode: ${esc(periodeLabel)}</div>
+    ${cacheDipakai ? `
+    <div class="card" style="border:1px solid var(--warn)">
+      ⚠️ Offline — data terakhir saat online: ${esc(fmtDate(new Date(cacheDipakai.at).toISOString()))}
+    </div>` : ""}
     ${laporanError ? `<div class="card"><div class="muted">📡 ${esc(laporanError)}</div></div>` : `
     <div class="stats">
       <div class="stat"><div class="label">Omset</div><div class="value teal">${rp(totalOmset)}</div></div>
@@ -1357,6 +1465,8 @@ async function bosLaporan(ses) {
       <div class="row-between kv"><span>Nilai stok saat ini <span class="muted">ikan yang belum laku, dihitung sebagai aset (bukan per periode)</span></span><b>${rp(k.nilai_stok || 0)}</b></div>
       <div class="row-between kv"><span>Laba penjualan <span class="muted">omset dikurangi modal ikan terjual &amp; kerugian</span></span><b>${rp(k.laba_penjualan !== undefined ? k.laba_penjualan : (j.total_untung || 0))}</b></div>
     </div>
+    ${cacheDipakai && cacheDipakai.deltaN > 0 ? `
+    <div class="muted" style="text-align:center;margin:-4px 0 10px">Termasuk ${cacheDipakai.deltaN} catatan antrean yang belum sinkron ke server.</div>` : ""}
     <div class="card">
       <h3>💸 Pengeluaran</h3>
       <form onsubmit="simpanPengeluaran();return false">
