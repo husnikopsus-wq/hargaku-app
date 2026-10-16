@@ -403,10 +403,12 @@ let lastNotaTx = null; // transaksi terakhir berhasil — untuk tombol Cetak Not
 const PICKERS = {
   jual: { q: "", open: false },
   sm: { q: "", open: false },
+  mati: { q: "", open: false },
 };
 function pickerSumber(name) {
-  // Jual: hanya yang berstok. Stok masuk: semua — restok barang habis memang tujuannya.
-  return name === "jual" ? BARANG.filter((x) => Number(x.stok) > 0) : BARANG;
+  // Stok masuk: semua barang. Jual & kematian: hanya yang berstok —
+  // yang habis tidak bisa dijual maupun dicatat mati.
+  return name === "sm" ? BARANG : BARANG.filter((x) => Number(x.stok) > 0);
 }
 function pickerHasilHTML(name) {
   const q = PICKERS[name].q.toLowerCase();
@@ -423,18 +425,22 @@ function pickerHasilHTML(name) {
       </div>
     </div>`).join("");
 }
+function pickerSelId(name) {
+  return name === "jual" ? sellProductId : name === "sm" ? stokMasukId : deathProductId;
+}
 function pickerHTML(name) {
-  const selId = name === "jual" ? sellProductId : stokMasukId;
+  const selId = pickerSelId(name);
   const sel = selId ? pickerSumber(name).find((x) => x.id === selId) || BARANG.find((x) => x.id === selId) : null;
   if (sel) {
-    // Admin tidak punya harga_belanja — tapi picker "sm" hanya ada di layar Bos
-    const harga = name === "jual" ? sel.harga_jual : sel.harga_belanja;
+    // Kematian tanpa harga sama sekali. Admin tidak punya harga_belanja —
+    // tapi picker "sm" hanya ada di layar Bos.
+    const harga = name === "jual" ? sel.harga_jual : name === "sm" ? sel.harga_belanja : null;
     return `
       <div class="card" style="background:var(--card2);padding:10px 12px;margin-bottom:4px">
         <div class="row-between">
           <div>
             <b>${esc(sel.nama)}</b><br>
-            <span class="muted">${esc(sel.id)} • Stok ${num(sel.stok)} • ${rp(harga || 0)}</span>
+            <span class="muted">${esc(sel.id)} • Stok ${num(sel.stok)}${harga !== null ? " • " + rp(harga || 0) : ""}</span>
           </div>
           <button type="button" class="btn small secondary" onclick="pickerHapus('${name}')">✕</button>
         </div>
@@ -473,11 +479,13 @@ function pickerPilih(name, id) {
   PICKERS[name].q = "";
   PICKERS[name].open = false;
   if (name === "jual") { sellProductId = id; renderJual(getSes()); }
-  else { stokMasukId = id; bosStokMasuk(getSes()); }
+  else if (name === "sm") { stokMasukId = id; bosStokMasuk(getSes()); }
+  else { deathProductId = id; renderMati(getSes()); }
 }
 function pickerHapus(name) {
   if (name === "jual") { sellProductId = null; renderJual(getSes()); }
-  else { stokMasukId = null; bosStokMasuk(getSes()); }
+  else if (name === "sm") { stokMasukId = null; bosStokMasuk(getSes()); }
+  else { deathProductId = null; renderMati(getSes()); }
 }
 
 function renderJual(ses) {
@@ -674,11 +682,8 @@ function renderMati(ses) {
       <div class="card">
         <form onsubmit="submitMati();return false">
         <div class="field">
-          <label>Pilih barang / unggas</label>
-          <select id="m-product" onchange="deathProductId=this.value;renderMati(getSes())">
-            <option value="">— pilih barang —</option>
-            ${available.map((x) => `<option value="${x.id}" ${x.id === deathProductId ? "selected" : ""}>${esc(x.nama)} (stok ${num(x.stok)})</option>`).join("")}
-          </select>
+          <label>Pilih barang / ikan</label>
+          ${pickerHTML("mati")}
           ${available.length === 0 ? `<div class="hint">Tidak ada barang berstok.</div>` : ""}
         </div>
         ${p ? `
