@@ -152,6 +152,10 @@ function handle(p) {
       if (String(p.key || "") !== getConfig("APP_KEY")) return out({ ok: false, error: "Kunci aplikasi (APP_KEY) salah." });
       return out({ ok: true });
     }
+    if (action === "etalase") {
+      if (String(p.key || "") !== getConfig("APP_KEY")) return out({ ok: false, error: "Kunci aplikasi (APP_KEY) salah." });
+      return out(etalaseList());
+    }
     var a = auth(p);
     if (a.error) return out({ ok: false, error: a.error });
     var user = a.user;
@@ -225,6 +229,15 @@ function barangList(user) {
   });
   return { ok: true, barang: list };
 }
+
+/* Etalase publik untuk website toko — cukup APP_KEY, tanpa PIN.
+   Hanya mengirim nama, harga jual, dan stok. Harga belanja TIDAK pernah keluar. */
+function etalaseList() {
+  var list = barangRows().map(function (b) {
+    return { id: b.id, nama: b.nama, harga_jual: b.harga_jual, stok: b.stok };
+  });
+  return { ok: true, barang: list };
+}
 function validAngkaBarang(p) {
   var nama = String(p.barang_nama || "").trim();
   var belanja = Number(p.harga_belanja);
@@ -289,15 +302,16 @@ function catatPelanggan(nama, noHp, totalBelanja, waktuStr) {
   if (rowIdx > 0) {
     var cur = v[rowIdx - 1];
     // Isi nama/no_hp yang dulu kosong bila sekarang diberikan
+    var hpSimpan = String(cur[1] || "") || noHp;
     s.getRange(rowIdx, 1, 1, 5).setValues([[
       String(cur[0] || "") || nama,
-      String(cur[1] || "") || noHp,
+      hpSimpan ? "'" + hpSimpan : "",
       (Number(cur[2]) || 0) + 1,
       (Number(cur[3]) || 0) + totalBelanja,
-      waktuStr
+      "'" + waktuStr
     ]]);
   } else {
-    s.appendRow([nama, noHp, 1, totalBelanja, waktuStr]);
+    s.appendRow([nama, noHp ? "'" + noHp : "", 1, totalBelanja, "'" + waktuStr]);
   }
 }
 function catatTransaksi(user, p, jenis) {
@@ -325,7 +339,7 @@ function catatTransaksi(user, p, jenis) {
   var waktu = new Date();
   var waktuStr = Utilities.formatDate(waktu, "Asia/Jakarta", "dd/MM/yyyy HH:mm");
   sheet("Transaksi").appendRow([
-    id, waktu, jenis, b.id, b.nama, jumlah, hargaJual, b.harga_belanja, user.nama, pembeli, hv.hp
+    id, waktu, jenis, b.id, b.nama, jumlah, hargaJual, b.harga_belanja, user.nama, pembeli, hv.hp ? "'" + hv.hp : ""
   ]);
   if (jenis === "jual") catatPelanggan(pembeli, hv.hp, jumlah * hargaJual, waktuStr);
   var tx = {
@@ -393,7 +407,7 @@ function doJualMulti(user, p) {
       var subtotal = e.jumlah * e.harga;
       total += subtotal;
       // harga_belanja disimpan sebagai snapshot — tidak pernah masuk nota
-      ts.appendRow([Utilities.getUuid(), waktu, "jual", g2.b.id, g2.b.nama, e.jumlah, e.harga, g2.b.harga_belanja, user.nama, pembeli, hv.hp]);
+      ts.appendRow([Utilities.getUuid(), waktu, "jual", g2.b.id, g2.b.nama, e.jumlah, e.harga, g2.b.harga_belanja, user.nama, pembeli, hv.hp ? "'" + hv.hp : ""]);
       notaItems.push({ nama_barang: g2.b.nama, jumlah: e.jumlah, harga_jual: e.harga, subtotal: subtotal });
     }
   }
