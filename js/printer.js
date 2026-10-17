@@ -80,7 +80,7 @@ async function printerConnect() {
 
 /* ---------------- Susun byte ESC/POS ---------------- */
 const ENC = new TextEncoder();
-const NOTA_WIDTH = 32; // kolom karakter untuk kertas 58mm
+const NOTA_WIDTH = 31; // kolom aman — sebagian printer 58mm tidak memakai 32 kolom penuh
 
 function notaLine(txt) { return ENC.encode(String(txt) + "\n"); }
 function notaGabung(parts) {
@@ -91,11 +91,23 @@ function notaGabung(parts) {
   parts.forEach((p) => { out.set(p, o); o += p.length; });
   return out;
 }
-// Baris rata kiri-kanan dalam 32 kolom (nama di kiri, nominal di kanan)
-function notaRow(kiri, kanan) {
+// Baris "kiri … kanan" dengan kanan berakhir TEPAT di kolom NOTA_WIDTH.
+// Bila tidak muat, nominal turun ke baris sendiri yang rata kanan.
+function notaBarisNilai(kiri, kanan) {
   const l = String(kiri), r = String(kanan);
+  const lines = [];
   const sp = NOTA_WIDTH - l.length - r.length;
-  return l + (sp > 0 ? " ".repeat(sp) : " ") + r;
+  if (sp >= 1) {
+    lines.push(l + " ".repeat(sp) + r);
+  } else {
+    lines.push(l.slice(0, NOTA_WIDTH));
+    lines.push(r.length >= NOTA_WIDTH ? r.slice(r.length - NOTA_WIDTH) : " ".repeat(NOTA_WIDTH - r.length) + r);
+  }
+  return lines;
+}
+// Label meta rata: "Waktu   : ", "Kasir   : ", "Pembeli : " — titik dua sejajar
+function notaMeta(label, val) {
+  return (String(label) + "        ").slice(0, 8) + ": " + val;
 }
 function notaWaktu(w) {
   const s = String(w || "");
@@ -138,25 +150,37 @@ function notaBytes(tx) {
     new Uint8Array([ESC, 0x40]),                          // init
     new Uint8Array([ESC, 0x61, 0x01]),                    // rata tengah
     new Uint8Array([GS, 0x21, 0x11, ESC, 0x45, 0x01]),    // ukuran ganda + tebal
-    notaLine("Teras Laut Cirebon"),
+    // Nama toko 2 baris — ukuran ganda = maks 15 karakter per baris (width 31)
+    notaLine("TERAS LAUT"),
+    notaLine("CIREBON"),
     new Uint8Array([GS, 0x21, 0x00, ESC, 0x45, 0x00]),    // ukuran normal
     notaLine("Nota Penjualan"),
     new Uint8Array([ESC, 0x61, 0x00]),                    // rata kiri
     notaLine(dash),
-    notaLine("Waktu : " + notaWaktu(n.waktu)),
-    notaLine("Kasir : " + (n.admin || "-")),
+    notaLine(notaMeta("Waktu", notaWaktu(n.waktu))),
+    notaLine(notaMeta("Kasir", n.admin || "-")),
   ];
-  if (n.pembeli) parts.push(notaLine("Pembeli: " + n.pembeli));
+  if (n.pembeli) parts.push(notaLine(notaMeta("Pembeli", n.pembeli)));
   parts.push(notaLine(dash));
   n.items.forEach((it) => {
-    parts.push(notaLine(String(it.nama_barang || "-")));
-    parts.push(notaLine(notaRow(it.jumlah + " x " + rp(it.harga_jual), rp(it.subtotal))));
+    parts.push(notaLine(String(it.nama_barang || "-").slice(0, NOTA_WIDTH)));
+    notaBarisNilai(it.jumlah + " x " + rp(it.harga_jual), rp(it.subtotal))
+      .forEach((l) => parts.push(notaLine(l)));
   });
+  parts.push(notaLine(dash));
+  // TOTAL satu baris ukuran ganda bila muat (15 karakter × 2 = 30 kolom);
+  // nominal raksasa jatuh ke ukuran normal rata kanan.
+  const totalStr = "TOTAL " + rp(n.total);
+  if (totalStr.length <= 15) {
+    parts.push(
+      new Uint8Array([ESC, 0x61, 0x01, GS, 0x21, 0x10, ESC, 0x45, 0x01]), // tengah + tinggi ganda + tebal
+      notaLine(totalStr),
+      new Uint8Array([GS, 0x21, 0x00, ESC, 0x45, 0x00, ESC, 0x61, 0x00])
+    );
+  } else {
+    notaBarisNilai("TOTAL", rp(n.total)).forEach((l) => parts.push(notaLine(l)));
+  }
   parts.push(
-    notaLine(dash),
-    new Uint8Array([GS, 0x21, 0x10, ESC, 0x45, 0x01]),    // tinggi ganda + tebal
-    notaLine(notaRow("TOTAL", rp(n.total))),
-    new Uint8Array([GS, 0x21, 0x00, ESC, 0x45, 0x00]),
     notaLine(dash),
     new Uint8Array([ESC, 0x61, 0x01]),
     notaLine("Terima kasih!"),
@@ -195,6 +219,8 @@ function printNotaFallback(tx) {
   const n = notaNormal(tx);
   const w = window.open("", "_blank", "width=380,height=600");
   if (!w) throw new Error("Bluetooth tidak tersedia dan jendela cetak diblokir browser.");
+  const totalStr = "TOTAL " + rp(n.total);
+  const totalBesar = totalStr.length <= 15; // cerminkan aturan ukuran ganda ESC/POS
   w.document.write(`<!DOCTYPE html>
 <html lang="id"><head><meta charset="UTF-8"><title>Nota Penjualan</title>
 <style>
@@ -205,18 +231,20 @@ function printNotaFallback(tx) {
   .row { display: flex; justify-content: space-between; }
   hr { border: none; border-top: 1px dashed #000; }
 </style></head><body>
-  <div class="tengah toko">Teras Laut Cirebon</div>
+  <div class="tengah toko">TERAS LAUT<br>CIREBON</div>
   <div class="tengah">Nota Penjualan</div>
   <hr>
-  <div>Waktu : ${esc(notaWaktu(n.waktu))}</div>
-  <div>Kasir : ${esc(n.admin || "-")}</div>
-  ${n.pembeli ? `<div>Pembeli: ${esc(n.pembeli)}</div>` : ""}
+  <div>${esc(notaMeta("Waktu", notaWaktu(n.waktu)))}</div>
+  <div>${esc(notaMeta("Kasir", n.admin || "-"))}</div>
+  ${n.pembeli ? `<div>${esc(notaMeta("Pembeli", n.pembeli))}</div>` : ""}
   <hr>
   ${n.items.map((it) => `
-  <div>${esc(it.nama_barang || "-")}</div>
+  <div>${esc(String(it.nama_barang || "-").slice(0, NOTA_WIDTH))}</div>
   <div class="row"><span>${num(it.jumlah)} x ${rp(it.harga_jual)}</span><span>${rp(it.subtotal)}</span></div>`).join("")}
   <hr>
-  <div class="row total"><span>TOTAL</span><span>${rp(n.total)}</span></div>
+  ${totalBesar
+    ? `<div class="tengah total">${esc(totalStr)}</div>`
+    : `<div class="row total"><span>TOTAL</span><span>${rp(n.total)}</span></div>`}
   <hr>
   <div class="tengah">Terima kasih!</div>
 </body></html>`);

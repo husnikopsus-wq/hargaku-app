@@ -1,6 +1,6 @@
 /* Service worker JualanKu (Teras Laut Cirebon) — cache shell aplikasi saja.
    Panggilan API ke Google Apps Script TIDAK pernah di-cache. */
-const CACHE = "jualanku-v19";
+const CACHE = "jualanku-v20";
 const ASSETS = [
   "./",
   "./index.html",
