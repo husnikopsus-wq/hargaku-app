@@ -252,6 +252,59 @@ function printNotaFallback(tx) {
   setTimeout(() => { try { w.focus(); w.print(); } catch (e) { /* biarkan user cetak manual */ } }, 300);
 }
 
+/* ---------------- Tes printer ---------------- */
+// Slip uji kecil dengan aturan layout yang sama seperti nota (31 kolom).
+// Hanya ASCII polos — printer thermal tidak bisa mencetak emoji.
+function tesPrinterBytes() {
+  const ESC = 0x1b, GS = 0x1d;
+  const dash = "-".repeat(NOTA_WIDTH);
+  return notaGabung([
+    new Uint8Array([ESC, 0x40]),                          // init
+    new Uint8Array([ESC, 0x61, 0x01]),                    // rata tengah
+    new Uint8Array([GS, 0x21, 0x11, ESC, 0x45, 0x01]),    // ukuran ganda + tebal
+    notaLine("TERAS LAUT"),
+    notaLine("CIREBON"),
+    new Uint8Array([GS, 0x21, 0x00, ESC, 0x45, 0x00]),    // ukuran normal
+    notaLine(dash),
+    notaLine("TES PRINTER"),
+    new Uint8Array([ESC, 0x45, 0x01]),                    // tebal
+    notaLine("PRINTER TERHUBUNG"),
+    new Uint8Array([ESC, 0x45, 0x00]),
+    new Uint8Array([ESC, 0x61, 0x00]),                    // rata kiri
+    notaLine(notaMeta("Waktu", notaWaktu(""))),
+    notaLine(dash),
+    new Uint8Array([ESC, 0x64, 0x03]),                    // feed 3 baris
+    new Uint8Array([GS, 0x56, 0x01])                      // potong sebagian
+  ]);
+}
+async function tesPrinter() {
+  if (!printerTersedia()) { tesPrinterFallback(); return; }
+  if (!printerStatus().terhubung) await printerConnect();
+  await printerKirim(tesPrinterBytes());
+}
+function tesPrinterFallback() {
+  const w = window.open("", "_blank", "width=380,height=400");
+  if (!w) throw new Error("Bluetooth tidak tersedia dan jendela cetak diblokir browser.");
+  w.document.write(`<!DOCTYPE html>
+<html lang="id"><head><meta charset="UTF-8"><title>Tes Printer</title>
+<style>
+  body { width: 58mm; margin: 0; padding: 4mm; font-family: monospace; font-size: 12px; }
+  .tengah { text-align: center; }
+  .toko { font-size: 18px; font-weight: bold; }
+  hr { border: none; border-top: 1px dashed #000; }
+</style></head><body>
+  <div class="tengah toko">TERAS LAUT<br>CIREBON</div>
+  <hr>
+  <div class="tengah">TES PRINTER</div>
+  <div class="tengah"><b>PRINTER TERHUBUNG</b></div>
+  <hr>
+  <div>${esc(notaMeta("Waktu", notaWaktu("")))}</div>
+  <hr>
+</body></html>`);
+  w.document.close();
+  setTimeout(() => { try { w.focus(); w.print(); } catch (e) { /* biarkan user cetak manual */ } }, 300);
+}
+
 // app.js bisa merender layar Pengaturan sebelum file ini selesai termuat —
 // segarkan status printer bila elemennya sudah ada di layar.
 if (typeof printerStatusHTML === "function") {

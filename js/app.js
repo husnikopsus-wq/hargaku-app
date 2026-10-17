@@ -873,7 +873,10 @@ function renderPengaturan(ses) {
       <div class="card">
         <h3>🖨️ Printer Bluetooth</h3>
         <div class="muted" id="printer-status" style="margin-bottom:10px">${printerStatusHTML()}</div>
-        <button class="btn secondary" onclick="hubungkanPrinter()">Hubungkan Printer</button>
+        <div class="btn-row">
+          <button class="btn secondary" onclick="hubungkanPrinter()">Hubungkan Printer</button>
+          <button class="btn secondary" onclick="tesPrinterDariPengaturan()">🖨️ Tes Printer</button>
+        </div>
         <div class="hint">Untuk printer thermal kasir 58mm. Membutuhkan Chrome di Android.</div>
       </div>
       ${ses.peran === "bos" ? `
@@ -935,6 +938,22 @@ async function hubungkanPrinter() {
   }
   const el = document.getElementById("printer-status");
   if (el) el.textContent = printerStatusHTML();
+}
+async function tesPrinterDariPengaturan() {
+  const el = document.getElementById("printer-status");
+  try {
+    await tesPrinter();
+    toast("PRINTER TERHUBUNG");
+    if (el) {
+      const d = new Date();
+      const p2 = (n) => String(n).padStart(2, "0");
+      el.textContent = "Terhubung: " + (printerStatus().nama || "printer") +
+        " ✓ (tes berhasil " + p2(d.getHours()) + ":" + p2(d.getMinutes()) + ")";
+    }
+  } catch (e) {
+    toast(e.message, true);
+    if (el) el.textContent = "Belum terhubung.";
+  }
 }
 
 /* =========================================================
