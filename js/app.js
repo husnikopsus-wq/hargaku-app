@@ -303,36 +303,47 @@ function renderSetup() {
       <div class="logo">
         <img src="img/logo-192.png" alt="Logo Teras Laut Cirebon" class="logo-img">
         <h1>JualanKu</h1>
-        <p><b>Teras Laut Cirebon</b> — hubungkan aplikasi ini ke Google Sheet Bos Anda</p>
+        <p><b>Teras Laut Cirebon</b></p>
       </div>
       <div class="card">
-        <h3>Konfigurasi pertama kali</h3>
-        <p class="muted" style="margin-bottom:10px">
-          Minta string konfigurasi ke Bos (bentuknya <b>URL|KUNCI</b>, biasanya dikirim lewat WhatsApp),
-          lalu tempel di bawah ini.
-        </p>
         <form onsubmit="saveSetup();return false">
         <div class="field">
-          <label>String konfigurasi</label>
-          <input id="cfg-string" placeholder="https://script.google.com/.../exec|kunci-rahasia" autocomplete="off">
+          <label>Kode rahasia</label>
+          <input id="cfg-string" placeholder="Tempel kode dari Bos di sini" autocomplete="off">
         </div>
         <button class="btn" type="submit">Hubungkan</button>
         </form>
       </div>
-      <p class="muted" style="text-align:center;font-size:.75rem">
-        Bos: panduan lengkap ada di README.md bagian "Panduan Setup Sekali Saja".
-      </p>
     </div>
   `);
 }
-async function saveSetup() {
-  const raw = document.getElementById("cfg-string").value.trim();
-  const parts = raw.split("|");
-  if (parts.length !== 2 || !parts[0].startsWith("http") || !parts[1]) {
-    toast("Format salah. Harus berbentuk URL|KUNCI.", true);
-    return;
+/* ---------------- Kode rahasia konfigurasi (obfuscation) ---------------- */
+function kodeEncode(cfg) {
+  const b = btoa(unescape(encodeURIComponent(cfg.url + "|" + cfg.key)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return "JK1." + b;
+}
+function kodeDecode(str) {
+  const s = String(str || "").trim();
+  if (!s) return null;
+  // Format lama polos (URL|KUNCI) tetap diterima demi kompatibilitas
+  if (s.startsWith("http") && s.indexOf("|") > 0) {
+    const parts = s.split("|");
+    if (parts.length === 2 && parts[0].startsWith("http") && parts[1]) {
+      return { url: parts[0].trim(), key: parts[1].trim() };
+    }
+    return null;
   }
-  const cfg = { url: parts[0].trim(), key: parts[1].trim() };
+  if (!s.startsWith("JK1.")) return null;
+  try {
+    let b = s.slice(4).replace(/-/g, "+").replace(/_/g, "/");
+    while (b.length % 4) b += "=";
+    return kodeDecode(decodeURIComponent(escape(atob(b)))); // hasil decode = URL|KUNCI
+  } catch (e) { return null; }
+}
+async function saveSetup() {
+  const cfg = kodeDecode(document.getElementById("cfg-string").value);
+  if (!cfg) { toast("Kode tidak valid. Minta kode yang benar ke Bos.", true); return; }
   toast("Memeriksa koneksi...");
   try {
     await pingCfg(cfg);
@@ -871,6 +882,11 @@ function renderPengaturan(ses) {
         <button class="btn secondary" onclick="ubahKonfigurasi()">Simpan Konfigurasi</button>
       </div>
       <div class="card">
+        <h3>🔗 Bagikan ke perangkat lain</h3>
+        <button class="btn secondary" onclick="salinKodeRahasia()">Salin kode rahasia</button>
+        <div class="hint">Kirim kode ini ke HP karyawan (misal lewat WhatsApp), lalu tempel di layar awal aplikasi.</div>
+      </div>
+      <div class="card">
         <h3>🖨️ Printer Bluetooth</h3>
         <div class="muted" id="printer-status" style="margin-bottom:10px">${printerStatusHTML()}</div>
         <div class="btn-row">
@@ -922,6 +938,29 @@ async function ubahKonfigurasi() {
   }
   setCfg(cfg);
   toast("Konfigurasi diperbarui.");
+}
+async function salinKodeRahasia() {
+  const cfg = getCfg();
+  if (!cfg) { toast("Konfigurasi belum ada.", true); return; }
+  const kode = kodeEncode(cfg);
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(kode);
+    } else {
+      // Cadangan untuk browser lama: textarea + execCommand
+      const ta = document.createElement("textarea");
+      ta.value = kode;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    toast("Kode rahasia disalin — kirim ke HP karyawan.");
+  } catch (e) {
+    toast("Gagal menyalin — salin manual dari kartu konfigurasi.", true);
+  }
 }
 function printerStatusHTML() {
   if (typeof printerStatus !== "function") return "Modul printer belum termuat.";

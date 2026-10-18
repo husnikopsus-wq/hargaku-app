@@ -58,15 +58,15 @@ Kerjakan langkah ini satu kali di komputer/HP Bos. Tidak perlu bisa programming.
 
 > ⚠️ Setiap kali Anda mengubah kode di editor, ulangi langkah d ini (**Deploy → New deployment**) supaya perubahannya aktif.
 
-### e. Susun & bagikan string konfigurasi
+### e. Bagikan kode rahasia ke karyawan
 
-Susun string dengan format **`URL|APP_KEY`** (dipisah tanda garis tegak `|`), contoh:
+Setelah Bos login ke aplikasi (HP Bos sendiri disetup dulu dengan string `URL|APP_KEY` dari langkah d):
 
-```
-https://script.google.com/macros/s/AKfycb.../exec|a1b2c3d4-e5f6-...
-```
+1. Bos: buka **Pengaturan → Salin kode rahasia** — kode ter-encode (diawali `JK1.`) otomatis tersalin.
+2. Kirim kode itu ke HP karyawan (misal lewat WhatsApp).
+3. Karyawan: buka aplikasi, **tempel kode di layar awal** ("Kode rahasia") → Hubungkan. Selesai.
 
-Bagikan string ini ke HP karyawan (misal lewat WhatsApp). Di HP masing-masing, saat pertama buka aplikasi, cukup **tempel string ini sekali** — selesai.
+> Kode `JK1.` sengaja di-encode agar tidak terbaca kasual. String lama `URL|APP_KEY` tetap diterima di layar awal demi kompatibilitas.
 
 ### f. Melihat data langsung di Google Sheet
 
