@@ -808,6 +808,15 @@ function handleTelegram(update) {
   var chatId = msg.chat.id;
   var text = String(msg.text || "").trim();
   if (!text) return;
+  // Normalisasi perintah garis miring: "/stok@namabot bandeng" → "stok bandeng",
+  // supaya bentuk bare ("stok bandeng") dan slash ("/stok bandeng") sama-sama cocok.
+  if (text.charAt(0) === "/") {
+    var sp = text.indexOf(" ");
+    var kataPertama = (sp < 0 ? text : text.slice(0, sp)).toLowerCase();
+    var at = kataPertama.indexOf("@");
+    if (at >= 0) kataPertama = kataPertama.slice(0, at);
+    text = kataPertama.slice(1) + (sp < 0 ? "" : text.slice(sp));
+  }
   // Config belum diisi → diam saja, jangan bocorkan apa pun
   if (!getConfig("TELEGRAM_TOKEN") || !getConfig("TELEGRAM_CHAT_ID")) return;
   try {
@@ -816,7 +825,7 @@ function handleTelegram(update) {
       return;
     }
     var low = text.toLowerCase();
-    if (low === "/start" || low === "bantuan" || low === "help" || low === "?") {
+    if (low === "start" || low === "/start" || low === "bantuan" || low === "help" || low === "?") {
       telegramKirim(chatId, "🐠 Bot Teras Laut Cirebon siap!\n\n" +
         "Tambah barang / kulakan — satu baris per barang:\n" +
         "nama, harga_beli, harga_jual, jumlah\n" +
