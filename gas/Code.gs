@@ -266,6 +266,14 @@ function doBarangAdd(user, p) {
   // Edit & hapus tetap khusus Bos. Respons tidak membawa harga sama sekali.
   var v = validAngkaBarang(p);
   if (v.error) return { ok: false, error: v.error };
+  // Tolak duplikat nama (abaikan huruf besar/kecil, spasi tepi & spasi ganda)
+  var norm = v.nama.replace(/\s+/g, " ").trim().toLowerCase();
+  var ada = barangRows();
+  for (var i = 0; i < ada.length; i++) {
+    if (ada[i].nama.replace(/\s+/g, " ").trim().toLowerCase() === norm) {
+      return { ok: false, error: "Barang \"" + v.nama + "\" sudah ada (" + ada[i].id + "). Gunakan Stok Masuk untuk menambah stoknya." };
+    }
+  }
   var id = String(p.barang_id || "").trim();
   if (id) {
     if (findBarang(id)) return { ok: false, error: "ID barang sudah dipakai: " + id };
