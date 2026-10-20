@@ -154,13 +154,16 @@ function applyOptimistic(action, params) {
   } else if (action === "barang_add") {
     // ID lokal dikirim juga ke server (barang_id) supaya ID-nya sama persis
     if (!params.barang_id) params.barang_id = "lokal-" + Date.now();
-    BARANG.push({
+    const baru = {
       id: params.barang_id,
       nama: params.barang_nama,
-      harga_belanja: Number(params.harga_belanja) || 0,
       harga_jual: Number(params.harga_jual) || 0,
       stok: Number(params.stok) || 0,
-    });
+    };
+    // Harga modal hanya masuk cache Bos — cache admin tidak pernah memuatnya
+    const sesKini = getSes();
+    if (!sesKini || sesKini.peran === "bos") baru.harga_belanja = Number(params.harga_belanja) || 0;
+    BARANG.push(baru);
   } else if (action === "barang_update") {
     const b = BARANG.find((x) => x.id === params.id);
     if (b) {
@@ -1130,7 +1133,9 @@ async function hapusBarang(id) {
   }
 }
 function bosBarangForm(ses, hash) {
-  const id = new URLSearchParams(hash.split("?")[1] || "").get("id");
+  const isBos = ses.peran === "bos";
+  // Admin hanya bisa menambah barang baru — parameter ?id= (edit) diabaikan untuk admin
+  const id = isBos ? new URLSearchParams(hash.split("?")[1] || "").get("id") : null;
   const p = id ? BARANG.find((x) => x.id === id) : null;
   setHTML(`
     ${headerHTML(p ? "Edit Barang" : "Tambah Barang", "Lengkapi harga modal & harga jual")}
@@ -1146,9 +1151,9 @@ function bosBarangForm(ses, hash) {
           <input id="f-nama" value="${esc(p ? p.nama : "")}" placeholder="cth: Ikan Bandeng">
         </div>
         <div class="field">
-          <label>Harga belanja (modal) — rahasia, hanya Bos</label>
+          <label>${isBos ? "Harga belanja (modal) — rahasia, hanya Bos" : "Harga beli per unit — harga yang Anda bayar"}</label>
           <input id="f-belanja" type="number" min="0" inputmode="numeric"
-            value="${p ? Number(p.harga_belanja) : ""}" placeholder="cth: 25000">
+            value="${p && isBos ? Number(p.harga_belanja) : ""}" placeholder="cth: 25000">
         </div>
         <div class="field">
           <label>Harga jual</label>
@@ -1183,13 +1188,14 @@ async function simpanBarang(id) {
   }
   const action = id ? "barang_update" : "barang_add";
   const full = id ? Object.assign({ id }, params) : params;
+  const hashKembali = (getSes() || {}).peran === "bos" ? "#/bos/barang" : "#/admin/stok";
   if (navigator.onLine) {
     try {
       await api(action, full);
       toast(id ? "Barang diperbarui." : "Barang ditambahkan.");
       lastRefresh = 0;
       await refreshBarang(true);
-      location.hash = "#/bos/barang";
+      location.hash = hashKembali;
       return;
     } catch (e) {
       if (!isNetError(e)) { toast(e.message, true); return; }
@@ -1198,7 +1204,7 @@ async function simpanBarang(id) {
   }
   // Offline: antrekan; barang baru langsung tampil dengan ID "lokal-..."
   queueMutation(action, full, "Disimpan di antrean — terkirim saat online.");
-  location.hash = "#/bos/barang";
+  location.hash = hashKembali;
 }
 
 /* ---------- Stok Masuk / kulakan (Bos) ---------- */
@@ -1754,6 +1760,7 @@ function renderAdmin(hash, ses) {
   if (hash === "#/admin/stok") return adminStok(ses);
   if (hash === "#/stok-masuk") return bosStokMasuk(ses);
   if (hash === "#/pengeluaran") return formPengeluaran(ses);
+  if (hash.startsWith("#/barang-form")) return bosBarangForm(ses, hash);
   if (hash === "#/riwayat") return renderRiwayat(ses);
   if (hash === "#/pengaturan") return renderPengaturan(ses);
   location.hash = "#/jual";
@@ -1764,6 +1771,7 @@ function adminStok(ses) {
     ${headerHTML("Stok Barang", "Harga jual & stok — tanpa harga modal")}
     <div class="content">
       <div class="btn-row" style="margin-bottom:10px">
+        <button class="btn secondary" onclick="location.hash='#/barang-form'">＋ Tambah Barang</button>
         <button class="btn secondary" onclick="location.hash='#/stok-masuk'">📥 Stok Masuk</button>
         <button class="btn secondary" onclick="location.hash='#/pengeluaran'">💸 Pengeluaran</button>
       </div>

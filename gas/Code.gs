@@ -252,7 +252,8 @@ function validAngkaBarang(p) {
   return { nama: nama, belanja: belanja, jual: jual, stok: stok };
 }
 function doBarangAdd(user, p) {
-  var deny = needBos(user); if (deny) return deny;
+  // Admin boleh menambah barang BARU (biasanya barang yang mereka kulak sendiri).
+  // Edit & hapus tetap khusus Bos. Respons tidak membawa harga sama sekali.
   var v = validAngkaBarang(p);
   if (v.error) return { ok: false, error: v.error };
   var id = String(p.barang_id || "").trim();
