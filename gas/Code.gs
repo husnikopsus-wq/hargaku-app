@@ -835,12 +835,17 @@ function handleTelegram(update) {
         "• jumlah boleh dikosongkan (dianggap 0)\n\n" +
         "Perintah lain:\n" +
         "stok <kata kunci> — cek stok barang\n" +
+        "stokall — semua stok (dikirim beberapa pesan)\n" +
         "jual <nama>, <harga>, <jumlah> — catat penjualan (harga boleh dikosongkan; bisa banyak baris sekaligus)\n" +
         "rekap — ringkasan hari ini");
       return;
     }
     if (low === "stok" || low.indexOf("stok ") === 0) {
       telegramKirim(chatId, telegramStok(text.slice(4).trim()));
+      return;
+    }
+    if (low === "stokall") {
+      telegramStokAll(chatId);
       return;
     }
     if (low === "jual" || low.indexOf("jual ") === 0) {
@@ -870,6 +875,22 @@ function telegramStok(kata) {
   return cocok.slice(0, 10).map(function (b) {
     return b.nama + " (" + b.id + ") — stok: " + b.stok;
   }).join("\n");
+}
+// Semua stok, urut sheet. Telegram membatasi 4096 karakter per pesan —
+// kirim bertahap per ~3500 karakter; hanya pesan pertama yang berjudul.
+function telegramStokAll(chatId) {
+  var list = barangRows();
+  if (!list.length) { telegramKirim(chatId, "Belum ada barang."); return; }
+  var chunk = "📦 Semua stok (" + list.length + " barang):";
+  for (var i = 0; i < list.length; i++) {
+    var line = list[i].nama + " (" + list[i].id + ") — stok: " + list[i].stok;
+    if (chunk.length + line.length + 1 > 3500) {
+      telegramKirim(chatId, chunk);
+      chunk = "…(lanjutan)";
+    }
+    chunk += "\n" + line;
+  }
+  telegramKirim(chatId, chunk);
 }
 // "jual <nama>, <harga>, <jumlah>" — bisa BANYAK BARIS sekaligus:
 // baris pertama memakai kata "jual", baris lanjutan cukup "nama, harga, jumlah"
