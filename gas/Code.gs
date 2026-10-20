@@ -876,12 +876,14 @@ function telegramStok(kata) {
     return b.nama + " (" + b.id + ") — stok: " + b.stok;
   }).join("\n");
 }
-// Semua stok, urut sheet. Telegram membatasi 4096 karakter per pesan —
-// kirim bertahap per ~3500 karakter; hanya pesan pertama yang berjudul.
+// Stok yang ada isinya saja (stok 0 dilewati), urut sheet. Telegram membatasi
+// 4096 karakter per pesan — kirim bertahap per ~3500 karakter; hanya pesan pertama yang berjudul.
 function telegramStokAll(chatId) {
-  var list = barangRows();
-  if (!list.length) { telegramKirim(chatId, "Belum ada barang."); return; }
-  var chunk = "📦 Semua stok (" + list.length + " barang):";
+  var all = barangRows();
+  var list = [];
+  for (var j = 0; j < all.length; j++) if (all[j].stok > 0) list.push(all[j]);
+  if (!list.length) { telegramKirim(chatId, "Semua barang stoknya kosong."); return; }
+  var chunk = "📦 Stok tersedia (" + list.length + " barang):";
   for (var i = 0; i < list.length; i++) {
     var line = list[i].nama + " (" + list[i].id + ") — stok: " + list[i].stok;
     if (chunk.length + line.length + 1 > 3500) {
