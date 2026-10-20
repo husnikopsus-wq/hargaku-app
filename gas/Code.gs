@@ -871,6 +871,7 @@ function handleTelegram(update) {
         "stok <kata kunci> — cek stok barang\n" +
         "stokall — semua stok (dikirim beberapa pesan)\n" +
         "jual <nama>, <harga>, <jumlah> — catat penjualan (harga boleh dikosongkan; bisa banyak baris sekaligus)\n" +
+        "mati <nama>, <jumlah> — catat kematian (jumlah boleh dikosongkan = 1; bisa banyak baris)\n" +
         "rekap — ringkasan hari ini");
       return;
     }
@@ -884,6 +885,10 @@ function handleTelegram(update) {
     }
     if (low === "jual" || low.indexOf("jual ") === 0) {
       telegramKirim(chatId, telegramJual(text.slice(4).trim()));
+      return;
+    }
+    if (low === "mati" || low.indexOf("mati ") === 0) {
+      telegramKirim(chatId, telegramMati(text.slice(4).trim()));
       return;
     }
     if (low === "rekap") {
@@ -1012,6 +1017,64 @@ function telegramJualBaris(mentah) {
   var hargaFinal = harga !== undefined ? harga : b.harga_jual;
   return { ok: true, total: jumlah * hargaFinal,
     pesan: "✅ " + b.nama + " ×" + jumlah + " — Rp " + ribuan(jumlah * hargaFinal) + " (sisa " + r.stok + ")" };
+}
+
+// "mati <nama>, <jumlah>" — bisa BANYAK BARIS (pola sama seperti /jual):
+// baris lanjutan cukup "nama, jumlah"; awalan "mati " ditoleransi;
+// jumlah boleh dikosongkan (dianggap 1). Baris kosong dilewati diam-diam.
+function telegramMati(isi) {
+  var lines = isi.split("\n");
+  var hasil = [], totalEkor = 0, totalRugi = 0, jumlahOk = 0;
+  for (var i = 0; i < lines.length; i++) {
+    var mentah = lines[i].trim();
+    if (!mentah) continue;
+    if (mentah.toLowerCase().indexOf("mati ") === 0) mentah = mentah.slice(5).trim();
+    if (!mentah) continue;
+    var r = telegramMatiBaris(mentah);
+    hasil.push(r.pesan);
+    if (r.ok) { totalEkor += r.jumlah; totalRugi += r.rugi; jumlahOk++; }
+  }
+  if (!hasil.length) {
+    return "❌ Format: mati <nama barang>, <jumlah>\n" +
+      "contoh: mati bandeng, 2\n" +
+      "(jumlah boleh dikosongkan — dianggap 1)\n" +
+      "Bisa banyak baris sekaligus — satu barang per baris.";
+  }
+  var balas = hasil.join("\n");
+  if (jumlahOk > 0) balas += "\n———\nTotal kematian: " + totalEkor + " ekor — kerugian Rp " + ribuan(totalRugi);
+  return balas;
+}
+function telegramMatiBaris(mentah) {
+  var bagian = mentah.split(",");
+  if (bagian.length > 2) {
+    return { ok: false, pesan: "❌ " + mentah + " — format: nama, jumlah (jumlah boleh dikosongkan)" };
+  }
+  var kata = bagian[0].trim();
+  if (!kata) return { ok: false, pesan: "❌ " + mentah + " — nama barang kosong" };
+  var jumlah = bagian.length === 2 ? Math.floor(Number(String(bagian[1]).trim())) : 1;
+  if (!jumlah || jumlah <= 0) return { ok: false, pesan: "❌ " + kata + " — jumlah harus angka lebih dari nol" };
+  var cocok = telegramCariBarang(kata);
+  if (cocok.length === 0) return { ok: false, pesan: "❌ " + kata + " — tidak ketemu. Coba: stok " + kata };
+  if (cocok.length > 1) {
+    return { ok: false, pesan: "❌ " + kata + " — ambigu: " +
+      cocok.slice(0, 5).map(function (b) { return b.nama; }).join(", ") };
+  }
+  var b = cocok[0];
+  if (jumlah > b.stok) return { ok: false, pesan: "❌ " + b.nama + " — stok kurang (sisa " + b.stok + ")" };
+  // Kunci per baris seperti jalur /jual supaya tidak balapan dengan trigger lain
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, pesan: "❌ " + b.nama + " — server sibuk, coba lagi" };
+  var r;
+  try {
+    r = catatTransaksi({ nama: "Telegram", peran: "bos" }, { barang_id: b.id, jumlah: jumlah }, "mati");
+  } finally {
+    lock.releaseLock();
+  }
+  if (!r.ok) return { ok: false, pesan: "❌ " + b.nama + " — " + r.error };
+  // Kerugian dihitung dari harga_belanja SAAT INI (modal terakhir)
+  var rugi = jumlah * (Number(b.harga_belanja) || 0);
+  return { ok: true, jumlah: jumlah, rugi: rugi,
+    pesan: "✅ " + b.nama + " ×" + jumlah + " mati — kerugian Rp " + ribuan(rugi) + " (sisa " + r.stok + ")" };
 }
 function telegramRekap() {
   var tz = "Asia/Jakarta";
