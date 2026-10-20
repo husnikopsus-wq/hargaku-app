@@ -872,6 +872,7 @@ function handleTelegram(update) {
         "stokall — semua stok (dikirim beberapa pesan)\n" +
         "jual <nama>, <harga>, <jumlah> — catat penjualan (harga boleh dikosongkan; bisa banyak baris sekaligus)\n" +
         "mati <nama>, <jumlah> — catat kematian (jumlah boleh dikosongkan = 1; bisa banyak baris)\n" +
+        "hapus <nama> — hapus barang (bisa banyak baris; riwayat transaksi tetap tersimpan)\n" +
         "rekap — ringkasan hari ini");
       return;
     }
@@ -889,6 +890,10 @@ function handleTelegram(update) {
     }
     if (low === "mati" || low.indexOf("mati ") === 0) {
       telegramKirim(chatId, telegramMati(text.slice(4).trim()));
+      return;
+    }
+    if (low === "hapus" || low.indexOf("hapus ") === 0) {
+      telegramKirim(chatId, telegramHapus(text.slice(5).trim()));
       return;
     }
     if (low === "rekap") {
@@ -1075,6 +1080,53 @@ function telegramMatiBaris(mentah) {
   var rugi = jumlah * (Number(b.harga_belanja) || 0);
   return { ok: true, jumlah: jumlah, rugi: rugi,
     pesan: "✅ " + b.nama + " ×" + jumlah + " mati — kerugian Rp " + ribuan(rugi) + " (sisa " + r.stok + ")" };
+}
+
+// "hapus <kata kunci>" — bisa BANYAK BARIS (pola sama seperti /jual & /mati).
+// Tiap baris = satu kata kunci (koma pun dianggap bagian kata kunci).
+// Baris wajib cocok TEPAT SATU barang — tidak ada hapus massal.
+function telegramHapus(isi) {
+  var lines = isi.split("\n");
+  var hasil = [], jumlahOk = 0;
+  for (var i = 0; i < lines.length; i++) {
+    var mentah = lines[i].trim();
+    if (!mentah) continue; // baris kosong — lewati diam-diam
+    if (mentah.toLowerCase().indexOf("hapus ") === 0) mentah = mentah.slice(6).trim();
+    if (!mentah) continue;
+    var r = telegramHapusBaris(mentah);
+    hasil.push(r.pesan);
+    if (r.ok) jumlahOk++;
+  }
+  if (!hasil.length) {
+    return "❌ Format: hapus <nama barang>\ncontoh: hapus udang mp\n" +
+      "Bisa banyak baris sekaligus — satu nama per baris.\n" +
+      "Riwayat transaksi barang yang dihapus tetap tersimpan.";
+  }
+  var balas = hasil.join("\n");
+  if (jumlahOk > 0) balas += "\n———\nTotal dihapus: " + jumlahOk + " barang";
+  return balas;
+}
+function telegramHapusBaris(mentah) {
+  var kata = mentah.trim();
+  if (!kata) return { ok: false, pesan: "❌ kata kunci kosong" };
+  var cocok = telegramCariBarang(kata);
+  if (cocok.length === 0) return { ok: false, pesan: "❌ " + kata + " — tidak ketemu" };
+  if (cocok.length > 1) {
+    return { ok: false, pesan: "⚠️ " + kata + " — tidak jelas: " +
+      cocok.slice(0, 5).map(function (b) { return b.nama; }).join(", ") + ". Perjelas ya." };
+  }
+  var b = cocok[0];
+  // Kunci seperti penulis lain supaya tidak balapan dengan trigger/aplikasi
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, pesan: "❌ " + b.nama + " — server sibuk, coba lagi" };
+  try {
+    // Hanya baris Barang yang dihapus — Transaksi TIDAK disentuh
+    // (laporan memakai snapshot nama_barang, jadi riwayat tetap utuh)
+    sheet("Barang").deleteRow(b.row);
+  } finally {
+    lock.releaseLock();
+  }
+  return { ok: true, pesan: "🗑️ " + b.nama + " (" + b.id + ") dihapus — stok terakhir " + b.stok };
 }
 function telegramRekap() {
   var tz = "Asia/Jakarta";
