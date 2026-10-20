@@ -792,17 +792,43 @@ function hitungKeuangan(items, totalUntung, cocok) {
    KEAMANAN: token & chat id TIDAK boleh ditulis di file ini
    (repo publik). Keduanya dibaca dari tab Config:
    TELEGRAM_TOKEN dan TELEGRAM_CHAT_ID. Bila kosong → diam saja. */
-function telegramKirim(chatId, text) {
+// Escape untuk parse_mode HTML (nama ikan bisa mengandung & < >)
+function escT(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function telegramKirim(chatId, text, useHtml) {
+  var token = getConfig("TELEGRAM_TOKEN");
+  if (!token) return;
+  var body = { chat_id: chatId, text: String(text) };
+  if (useHtml) body.parse_mode = "HTML";
+  try {
+    var res = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify(body),
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() !== 200) {
+      // Jangan pernah diam — log penyebabnya, lalu coba lagi teks polos
+      Logger.log("Telegram gagal (" + res.getResponseCode() + "): " + res.getContentText());
+      if (useHtml) telegramKirimPolos(chatId, String(text).replace(/<[^>]*>/g, ""));
+    }
+  } catch (e) {
+    Logger.log("telegramKirim error: " + e.message);
+  }
+}
+// Jalur teks polos tanpa parse_mode — tidak bisa gagal karena markup
+function telegramKirimPolos(chatId, text) {
   var token = getConfig("TELEGRAM_TOKEN");
   if (!token) return;
   try {
     UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
       method: "post",
       contentType: "application/json",
-      payload: JSON.stringify({ chat_id: chatId, text: text }),
+      payload: JSON.stringify({ chat_id: chatId, text: String(text) }),
       muteHttpExceptions: true
     });
-  } catch (e) { /* abaikan — webhook harus tetap balas 200 */ }
+  } catch (e) { Logger.log("telegramKirimPolos error: " + e.message); }
 }
 function ribuan(n) {
   var s = String(Math.round(Number(n) || 0));
@@ -884,23 +910,42 @@ function telegramStok(kata) {
     return b.nama + " (" + b.id + ") — stok: " + b.stok;
   }).join("\n");
 }
-// Stok yang ada isinya saja (stok 0 dilewati), urut sheet. Telegram membatasi
-// 4096 karakter per pesan — kirim bertahap per ~3500 karakter; hanya pesan pertama yang berjudul.
+// Semua stok yang tersedia, dikelompokkan per kategori (kata pertama nama),
+// tanpa ID, nama ditebalkan — mode HTML. Telegram membatasi 4096 karakter per
+// pesan; kirim bertahap per ~3500 karakter (flush hanya di antara baris).
 function telegramStokAll(chatId) {
   var all = barangRows();
   var list = [];
   for (var j = 0; j < all.length; j++) if (all[j].stok > 0) list.push(all[j]);
   if (!list.length) { telegramKirim(chatId, "Semua barang stoknya kosong."); return; }
-  var chunk = "📦 Stok tersedia (" + list.length + " barang):";
+  var grup = {};
+  var urut = [];
   for (var i = 0; i < list.length; i++) {
-    var line = list[i].nama + " (" + list[i].id + ") — stok: " + list[i].stok;
-    if (chunk.length + line.length + 1 > 3500) {
-      telegramKirim(chatId, chunk);
+    var nama = list[i].nama.replace(/\s+/g, " ").trim();
+    var kat = (nama.split(" ")[0] || "-").toUpperCase();
+    if (!grup[kat]) { grup[kat] = []; urut.push(kat); }
+    grup[kat].push({ nama: nama, stok: list[i].stok });
+  }
+  urut.sort();
+  var lines = [];
+  for (var k = 0; k < urut.length; k++) {
+    var g = grup[urut[k]];
+    g.sort(function (a, b) { return a.nama < b.nama ? -1 : a.nama > b.nama ? 1 : 0; });
+    if (lines.length) lines.push(""); // baris kosong antar kategori
+    lines.push("🐟 <b>" + escT(urut[k]) + "</b>");
+    for (var m = 0; m < g.length; m++) {
+      lines.push("• <b>" + escT(g[m].nama) + "</b> — " + g[m].stok);
+    }
+  }
+  var chunk = "📦 <b>STOK TERSEDIA</b> (" + list.length + " jenis)";
+  for (var n = 0; n < lines.length; n++) {
+    if (chunk.length + lines[n].length + 1 > 3500) {
+      telegramKirim(chatId, chunk, true);
       chunk = "…(lanjutan)";
     }
-    chunk += "\n" + line;
+    chunk += "\n" + lines[n];
   }
-  telegramKirim(chatId, chunk);
+  telegramKirim(chatId, chunk, true);
 }
 // "jual <nama>, <harga>, <jumlah>" — bisa BANYAK BARIS sekaligus:
 // baris pertama memakai kata "jual", baris lanjutan cukup "nama, harga, jumlah"
