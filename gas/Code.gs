@@ -102,6 +102,8 @@ function setup() {
 
   Logger.log("Setup selesai. Akun bawaan: Bos PIN 1234 (bos), Budi PIN 5678 (admin).");
   Logger.log("SEGERA ganti PIN lewat menu Pengaturan di aplikasi setelah login pertama.");
+  Logger.log("Opsional — Bot Telegram: isi TELEGRAM_TOKEN dan TELEGRAM_CHAT_ID di tab Config.");
+  Logger.log("JANGAN menulis token Telegram di kode ini — repo bersifat publik.");
   Logger.log("Lanjutkan: Deploy → New deployment → Web app → Execute as Me → Access Anyone.");
 }
 
@@ -119,6 +121,12 @@ function doPost(e) {
     p = JSON.parse(e.postData.contents);
   } catch (err) {
     return out({ ok: false, error: "Format permintaan tidak valid." });
+  }
+  // Webhook Telegram punya field "message"/"edited_message", bukan "action"
+  if (p.message || p.edited_message) {
+    handleTelegram(p);
+    return ContentService.createTextOutput("{}")
+      .setMimeType(ContentService.MimeType.JSON);
   }
   return handle(p);
 }
@@ -757,4 +765,147 @@ function hitungKeuangan(items, totalUntung, cocok) {
     nilai_stok: nilaiStok,
     laba_penjualan: totalUntung
   };
+}
+
+/* ---------------- Bot Telegram (khusus Bos) ----------------
+   KEAMANAN: token & chat id TIDAK boleh ditulis di file ini
+   (repo publik). Keduanya dibaca dari tab Config:
+   TELEGRAM_TOKEN dan TELEGRAM_CHAT_ID. Bila kosong → diam saja. */
+function telegramKirim(chatId, text) {
+  var token = getConfig("TELEGRAM_TOKEN");
+  if (!token) return;
+  try {
+    UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify({ chat_id: chatId, text: text }),
+      muteHttpExceptions: true
+    });
+  } catch (e) { /* abaikan — webhook harus tetap balas 200 */ }
+}
+function ribuan(n) {
+  var s = String(Math.round(Number(n) || 0));
+  var out = "";
+  while (s.length > 3) { out = "." + s.slice(-3) + out; s = s.slice(0, -3); }
+  return s + out;
+}
+function handleTelegram(update) {
+  var msg = update.message || update.edited_message;
+  if (!msg || !msg.chat) return;
+  var chatId = msg.chat.id;
+  var text = String(msg.text || "").trim();
+  if (!text) return;
+  // Config belum diisi → diam saja, jangan bocorkan apa pun
+  if (!getConfig("TELEGRAM_TOKEN") || !getConfig("TELEGRAM_CHAT_ID")) return;
+  try {
+    if (String(chatId) !== getConfig("TELEGRAM_CHAT_ID")) {
+      telegramKirim(chatId, "Maaf, bot ini khusus Bos Teras Laut Cirebon.");
+      return;
+    }
+    var low = text.toLowerCase();
+    if (low === "/start" || low === "bantuan" || low === "help" || low === "?") {
+      telegramKirim(chatId, "🐠 Bot Teras Laut Cirebon siap!\n\n" +
+        "Tambah barang / kulakan — satu baris per barang:\n" +
+        "nama, harga_beli, harga_jual, jumlah\n" +
+        "contoh:\nAg Napoleon L, 18000, 25000, 20\n\n" +
+        "• Nama yang sudah ada → stok & harga diperbarui (kulakan)\n" +
+        "• Nama baru → barang baru dibuat\n" +
+        "• jumlah boleh dikosongkan (dianggap 0)\n\n" +
+        "Perintah lain:\n" +
+        "stok <kata kunci> — cek stok barang\n" +
+        "rekap — ringkasan hari ini");
+      return;
+    }
+    if (low === "stok" || low.indexOf("stok ") === 0) {
+      telegramKirim(chatId, telegramStok(text.slice(4).trim()));
+      return;
+    }
+    if (low === "rekap") {
+      telegramKirim(chatId, telegramRekap());
+      return;
+    }
+    telegramKirim(chatId, telegramInputBarang(text));
+  } catch (err) {
+    telegramKirim(chatId, "Terjadi kesalahan: " + err.message);
+  }
+}
+function telegramStok(kata) {
+  if (!kata) return "Tulis kata kuncinya, cth: stok bandeng";
+  var q = kata.toLowerCase();
+  var cocok = barangRows().filter(function (b) {
+    return (b.nama + " " + b.id).toLowerCase().indexOf(q) >= 0;
+  });
+  if (!cocok.length) return "Tidak ketemu.";
+  return cocok.slice(0, 10).map(function (b) {
+    return b.nama + " (" + b.id + ") — stok: " + b.stok;
+  }).join("\n");
+}
+function telegramRekap() {
+  var tz = "Asia/Jakarta";
+  var today = Utilities.formatDate(new Date(), tz, "yyyy/MM/dd");
+  var r = rows("Transaksi");
+  var jual = 0, mati = 0, omset = 0;
+  for (var i = 0; i < r.length; i++) {
+    if (!r[i][0]) continue;
+    if (Utilities.formatDate(new Date(r[i][1]), tz, "yyyy/MM/dd") !== today) continue;
+    var jumlah = Number(r[i][5]) || 0;
+    if (String(r[i][2]) === "jual") { jual++; omset += jumlah * (Number(r[i][6]) || 0); }
+    else if (String(r[i][2]) === "mati") { mati++; }
+  }
+  return "📊 Rekap " + Utilities.formatDate(new Date(), tz, "dd/MM/yyyy") + ":\n" +
+    "🛒 Penjualan: " + jual + " transaksi — Rp " + ribuan(omset) + "\n" +
+    "💀 Kematian: " + mati + " catatan";
+}
+// Setiap baris: "nama, harga_beli, harga_jual, jumlah" (jumlah opsional, default 0)
+// Baris valid diproses, baris rusak dilaporkan — batch tidak dibatalkan.
+function telegramInputBarang(text) {
+  var lines = text.split("\n");
+  var ok = [], gagal = [];
+  for (var i = 0; i < lines.length; i++) {
+    var mentah = lines[i].trim();
+    if (!mentah) continue;
+    var hasil = telegramProsesBaris(mentah);
+    if (hasil.error) gagal.push("Baris " + (i + 1) + ": " + hasil.error + " (" + mentah + ")");
+    else ok.push(hasil.pesan);
+  }
+  if (!ok.length && !gagal.length) return "Pesan kosong. Ketik bantuan untuk panduan.";
+  var balas = "";
+  if (ok.length) balas += "✅ Ditambahkan/diupdate:\n" + ok.join("\n");
+  if (gagal.length) balas += (balas ? "\n\n" : "") + "⚠️ Baris gagal:\n" + gagal.join("\n");
+  return balas;
+}
+function telegramProsesBaris(mentah) {
+  var bagian = mentah.split(",");
+  if (bagian.length < 3 || bagian.length > 4) {
+    return { error: "salah format — harus: nama, harga_beli, harga_jual, jumlah" };
+  }
+  var nama = bagian[0].trim();
+  var beli = Number(String(bagian[1]).trim());
+  var jual = Number(String(bagian[2]).trim());
+  var jumlah = bagian[3] === undefined ? 0 : Math.floor(Number(String(bagian[3]).trim()));
+  if (!nama) return { error: "nama kosong" };
+  if (isNaN(beli) || beli < 0 || isNaN(jual) || jual < 0) return { error: "harga harus angka nol atau lebih" };
+  if (isNaN(jumlah) || jumlah < 0) return { error: "jumlah harus angka nol atau lebih" };
+  var list = barangRows();
+  var b = null;
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].nama.toLowerCase() === nama.toLowerCase() || list[i].id.toLowerCase() === nama.toLowerCase()) { b = list[i]; break; }
+  }
+  if (b) {
+    // Restok: harga selalu diperbarui; stok bertambah bila jumlah > 0
+    sheet("Barang").getRange(b.row, 3).setValue(beli);
+    sheet("Barang").getRange(b.row, 4).setValue(jual);
+    if (jumlah > 0) {
+      sheet("Barang").getRange(b.row, 5).setValue(b.stok + jumlah);
+      catatPengeluaran({ nama: "Telegram" }, "kulakan", "Kulakan via Telegram: " + b.nama + " ×" + jumlah, jumlah * beli);
+      return { pesan: b.nama + " — stok +" + jumlah + " → " + (b.stok + jumlah) };
+    }
+    return { pesan: b.nama + " — harga diperbarui (stok tetap " + b.stok + ")" };
+  }
+  var id = Utilities.getUuid();
+  sheet("Barang").appendRow([id, nama, beli, jual, jumlah]);
+  if (jumlah > 0 && beli > 0) {
+    catatPengeluaran({ nama: "Telegram" }, "kulakan", "Stok awal: " + nama + " ×" + jumlah, jumlah * beli);
+  }
+  return { pesan: nama + " — barang baru (stok " + jumlah + ")" };
 }

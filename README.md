@@ -81,6 +81,28 @@ Semua data bisa dipantau langsung dari spreadsheet Anda:
 
 ---
 
+## 🤖 Bot Telegram (opsional, khusus Bos)
+
+Bos bisa menambah barang / mencatat kulakan lewat chat Telegram. Token bot **tidak pernah ditulis di kode** (repo ini publik) — disimpan di tab Config spreadsheet.
+
+1. Di Telegram, chat ke **@BotFather** → `/newbot` → ikuti instruksi → salin **token**-nya.
+2. Di tab **Config** spreadsheet, tambahkan baris: `TELEGRAM_TOKEN` = token tadi.
+3. Chat ke bot Anda, kirim `/start` (abaikan balasannya dulu). Cari chat id Anda: buka `https://api.telegram.org/bot<TOKEN>/getUpdates` di browser — lihat `"chat":{"id":...}`. (Bot belum aktif sebelum langkah 5, jadi getUpdates tetap bisa dibaca.)
+4. Tambahkan baris Config: `TELEGRAM_CHAT_ID` = angka chat id itu.
+5. Redeploy Apps Script (Deploy → New deployment), lalu daftarkan webhook:
+   buka `https://api.telegram.org/bot<TOKEN>/setWebhook?url=<URL_WEB_APP>`.
+
+Format pesan (satu baris per barang):
+
+```
+nama, harga_beli, harga_jual, jumlah
+Ag Napoleon L, 18000, 25000, 20
+```
+
+Nama yang sudah ada → stok & harga diperbarui (kulakan); nama baru → barang baru dibuat. `jumlah` boleh dikosongkan. Perintah lain: `stok <kata kunci>` dan `rekap`.
+
+---
+
 ## ▶️ Cara menjalankan aplikasi
 
 Aplikasi ini file web statis — tidak perlu install apa pun.
