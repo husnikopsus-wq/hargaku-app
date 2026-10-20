@@ -192,6 +192,7 @@ function handle(p) {
       case "pengeluaran_add":    return withLock(function () { return doPengeluaranAdd(user, p); });
       case "pengeluaran_list":   return out(doPengeluaranList(user));
       case "pengeluaran_hapus":  return withLock(function () { return doPengeluaranHapus(user, p); });
+      case "config_set":         return withLock(function () { return doConfigSet(user, p); });
       default:                return out({ ok: false, error: "Aksi tidak dikenal: " + action });
     }
   } catch (err) {
@@ -669,6 +670,17 @@ function doPengeluaranHapus(user, p) {
     }
   }
   return { ok: false, error: "Catatan pengeluaran tidak ditemukan." };
+}
+
+/* ---------------- Config jarak jauh (khusus Bos) ---------------- */
+// Hanya kunci telegram yang boleh diubah lewat API — sisanya tetap manual.
+function doConfigSet(user, p) {
+  var deny = needBos(user); if (deny) return deny;
+  var kunci = String(p.kunci || "").trim();
+  var boleh = ["TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_OFFSET"];
+  if (boleh.indexOf(kunci) < 0) return { ok: false, error: "Kunci konfigurasi tidak diizinkan." };
+  setConfig(kunci, String(p.nilai || "").trim());
+  return { ok: true };
 }
 
 /* ---------------- Laporan (khusus Bos) ---------------- */
