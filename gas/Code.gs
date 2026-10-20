@@ -835,11 +835,16 @@ function handleTelegram(update) {
         "• jumlah boleh dikosongkan (dianggap 0)\n\n" +
         "Perintah lain:\n" +
         "stok <kata kunci> — cek stok barang\n" +
+        "jual <nama>, <harga>, <jumlah> — catat penjualan (harga boleh dikosongkan)\n" +
         "rekap — ringkasan hari ini");
       return;
     }
     if (low === "stok" || low.indexOf("stok ") === 0) {
       telegramKirim(chatId, telegramStok(text.slice(4).trim()));
+      return;
+    }
+    if (low === "jual" || low.indexOf("jual ") === 0) {
+      telegramKirim(chatId, telegramJual(text.slice(4).trim()));
       return;
     }
     if (low === "rekap") {
@@ -851,16 +856,66 @@ function handleTelegram(update) {
     telegramKirim(chatId, "Terjadi kesalahan: " + err.message);
   }
 }
-function telegramStok(kata) {
-  if (!kata) return "Tulis kata kuncinya, cth: stok bandeng";
-  var q = kata.toLowerCase();
-  var cocok = barangRows().filter(function (b) {
+function telegramCariBarang(kata) {
+  var q = String(kata || "").toLowerCase();
+  if (!q) return [];
+  return barangRows().filter(function (b) {
     return (b.nama + " " + b.id).toLowerCase().indexOf(q) >= 0;
   });
+}
+function telegramStok(kata) {
+  if (!kata) return "Tulis kata kuncinya, cth: stok bandeng";
+  var cocok = telegramCariBarang(kata);
   if (!cocok.length) return "Tidak ketemu.";
   return cocok.slice(0, 10).map(function (b) {
     return b.nama + " (" + b.id + ") — stok: " + b.stok;
   }).join("\n");
+}
+// "jual <kata kunci>, <harga jual>, <jumlah>" — harga boleh dihilangkan
+// ("jual <kata kunci>, <jumlah>") → pakai harga_jual barang.
+// Penjualan dicatat lewat catatTransaksi (jalur yang sama dengan aplikasi).
+function telegramJual(isi) {
+  var bagian = isi.split(",");
+  if (bagian.length < 2 || bagian.length > 3) {
+    return "❌ Format: jual <nama barang>, <harga jual>, <jumlah>\n" +
+      "contoh: jual bandeng, 35000, 2\n" +
+      "(harga boleh dikosongkan: jual bandeng, 2 — pakai harga barang)";
+  }
+  var kata = bagian[0].trim();
+  if (!kata) return "❌ Tulis nama barangnya. Format: jual <nama>, <harga>, <jumlah>";
+  var harga, jumlah;
+  if (bagian.length === 3) {
+    harga = Number(String(bagian[1]).trim());
+    jumlah = Math.floor(Number(String(bagian[2]).trim()));
+    if (isNaN(harga) || harga < 0) return "❌ Harga jual harus angka nol atau lebih.";
+  } else {
+    jumlah = Math.floor(Number(String(bagian[1]).trim()));
+  }
+  if (!jumlah || jumlah <= 0) return "❌ Jumlah harus angka lebih dari nol.";
+  var cocok = telegramCariBarang(kata);
+  if (cocok.length === 0) return "❌ Barang '" + kata + "' tidak ketemu. Coba: stok " + kata;
+  if (cocok.length > 1) {
+    return "🔎 Ada beberapa barang cocok:\n" + cocok.slice(0, 5).map(function (b) {
+      return b.nama + " (" + b.id + ") — stok " + b.stok;
+    }).join("\n") + "\nPerjelas namanya ya.";
+  }
+  var b = cocok[0];
+  if (jumlah > b.stok) return "❌ Stok " + b.nama + " kurang — sisa " + b.stok;
+  var p = { barang_id: b.id, jumlah: jumlah };
+  if (harga !== undefined) p.harga_jual = harga;
+  // Kunci seperti jalur API (withLock) supaya tidak balapan dengan trigger lain
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return "Server sibuk, coba beberapa detik lagi.";
+  var r;
+  try {
+    r = catatTransaksi({ nama: "Telegram", peran: "bos" }, p, "jual");
+  } finally {
+    lock.releaseLock();
+  }
+  if (!r.ok) return "❌ " + r.error;
+  var hargaFinal = harga !== undefined ? harga : b.harga_jual;
+  return "✅ Terjual: " + b.nama + " ×" + jumlah + " — Rp " + ribuan(jumlah * hargaFinal) +
+    " (stok sisa " + r.stok + ")";
 }
 function telegramRekap() {
   var tz = "Asia/Jakarta";
