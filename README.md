@@ -89,8 +89,12 @@ Bos bisa menambah barang / mencatat kulakan lewat chat Telegram. Token bot **tid
 2. Di tab **Config** spreadsheet, tambahkan baris: `TELEGRAM_TOKEN` = token tadi.
 3. Chat ke bot Anda, kirim `/start` (abaikan balasannya dulu). Cari chat id Anda: buka `https://api.telegram.org/bot<TOKEN>/getUpdates` di browser — lihat `"chat":{"id":...}`. (Bot belum aktif sebelum langkah 5, jadi getUpdates tetap bisa dibaca.)
 4. Tambahkan baris Config: `TELEGRAM_CHAT_ID` = angka chat id itu.
-5. Redeploy Apps Script (Deploy → New deployment), lalu daftarkan webhook:
-   buka `https://api.telegram.org/bot<TOKEN>/setWebhook?url=<URL_WEB_APP>`.
+5. Redeploy Apps Script (Deploy → New deployment), lalu pasang pemicu polling:
+   di editor Apps Script → ikon **⏰ (Triggers/Pemicu)** di menu kiri → **+ Add Trigger** →
+   pilih fungsi **`telegramPolling`** → event source: **Time-driven** → interval: **Every minute** → **Save**.
+   Bot memeriksa pesan tiap menit, jadi balasan bisa telat sampai ±1 menit.
+
+(Webhook tidak dipakai — Telegram menolak URL `/exec` Apps Script karena redirect.)
 
 Format pesan (satu baris per barang):
 

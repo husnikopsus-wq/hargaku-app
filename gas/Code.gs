@@ -102,7 +102,8 @@ function setup() {
 
   Logger.log("Setup selesai. Akun bawaan: Bos PIN 1234 (bos), Budi PIN 5678 (admin).");
   Logger.log("SEGERA ganti PIN lewat menu Pengaturan di aplikasi setelah login pertama.");
-  Logger.log("Opsional — Bot Telegram: isi TELEGRAM_TOKEN dan TELEGRAM_CHAT_ID di tab Config.");
+  Logger.log("Opsional — Bot Telegram: isi TELEGRAM_TOKEN dan TELEGRAM_CHAT_ID di tab Config,");
+  Logger.log("lalu pasang pemicu waktu untuk fungsi telegramPolling (menu ⏰ → + Add Trigger → Every minute).");
   Logger.log("JANGAN menulis token Telegram di kode ini — repo bersifat publik.");
   Logger.log("Lanjutkan: Deploy → New deployment → Web app → Execute as Me → Access Anyone.");
 }
@@ -877,7 +878,7 @@ function telegramInputBarang(text) {
 function telegramProsesBaris(mentah) {
   var bagian = mentah.split(",");
   if (bagian.length < 3 || bagian.length > 4) {
-    return { error: "salah format — harus: nama, harga_beli, harga_jual, jumlah" };
+    return { error: "salah format — pisahkan dengan KOMA, contoh: Payunga, 15000, 30000, 3" };
   }
   var nama = bagian[0].trim();
   var beli = Number(String(bagian[1]).trim());
@@ -908,4 +909,33 @@ function telegramProsesBaris(mentah) {
     catatPengeluaran({ nama: "Telegram" }, "kulakan", "Stok awal: " + nama + " ×" + jumlah, jumlah * beli);
   }
   return { pesan: nama + " — barang baru (stok " + jumlah + ")" };
+}
+
+/* ---------------- Polling Telegram (webhook ditolak Google) ----------------
+   Pasang lewat pemicu waktu: ⏰ Triggers → + Add Trigger → telegramPolling →
+   Time-driven → Every minute. Offset disimpan di Config (TELEGRAM_OFFSET)
+   supaya tidak ada pesan yang diproses dua kali. */
+function telegramPolling() {
+  try {
+    var token = getConfig("TELEGRAM_TOKEN");
+    if (!token || !getConfig("TELEGRAM_CHAT_ID")) return; // belum disetup → diam
+    var offset = getConfig("TELEGRAM_OFFSET") || "0";
+    var res = UrlFetchApp.fetch(
+      "https://api.telegram.org/bot" + token + "/getUpdates?offset=" + encodeURIComponent(offset) + "&timeout=0&limit=20",
+      { muteHttpExceptions: true }
+    );
+    var data;
+    try {
+      data = JSON.parse(res.getContentText());
+    } catch (e) { return; }
+    if (!data || !data.ok || !data.result) return;
+    for (var i = 0; i < data.result.length; i++) {
+      var upd = data.result[i];
+      handleTelegram(upd); // bentuk update sama persis seperti webhook
+      setConfig("TELEGRAM_OFFSET", String(upd.update_id + 1));
+    }
+  } catch (err) {
+    // Fungsi ini jalan lewat trigger — cukup dicatat, jangan pernah melempar error
+    Logger.log("telegramPolling gagal: " + err.message);
+  }
 }
